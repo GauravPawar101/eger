@@ -1,0 +1,43 @@
+[package]
+name = "maramura"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Parallel, async image/video -> ASCII-art pipeline built on iascii"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/Gauravpawar101/maramura"
+homepage = "https://github.com/Gauravpawar101/maramura"
+documentation = "https://docs.rs/maramura"
+keywords = ["ascii", "ascii-art", "terminal", "image", "video"]
+categories = ["multimedia::images", "command-line-utilities"]
+
+[dependencies]
+# "parallel" enables iascii's internal Rayon-powered row conversion
+# (controlled per-Config via `parallel_threshold`).
+iascii = { version = "0.1.2", features = ["parallel"] }
+
+image = { version = "0.24", default-features = false, features = [
+    "png", "jpeg", "gif", "bmp",
+] }
+
+# Only pulled in by the `video` feature: video streaming/playback is the
+# only thing in this crate that needs an async runtime. Plain image
+# rendering (including the Rayon-parallel batch path) never touches tokio.
+tokio = { version = "1", features = [
+    "rt-multi-thread", "macros", "process", "fs", "io-util", "io-std", "time", "sync",
+], optional = true }
+
+rayon = "1.10"
+regex = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[features]
+default = []
+# ffmpeg/ffprobe-backed video -> ASCII pipeline, terminal playback, and the
+# async (`_async`) image/render helpers that share tokio with it. Rayon-based
+# parallel batch image rendering does NOT require this — it's always on.
+video = ["dep:tokio"]
