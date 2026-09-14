@@ -100,6 +100,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
+name = "eger"
+version = "0.1.0"
+dependencies = [
+ "iascii",
+ "image",
+ "rayon",
+ "regex",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -189,18 +201,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
  "scopeguard",
-]
-
-[[package]]
-name = "maramura"
-version = "0.1.0"
-dependencies = [
- "iascii",
- "image",
- "rayon",
- "regex",
- "thiserror",
- "tokio",
 ]
 
 [[package]]

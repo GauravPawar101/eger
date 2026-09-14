@@ -5,7 +5,7 @@
 //! `::image::...` path throughout, since the module itself is named `image`.
 
 use crate::config::Config;
-use crate::error::{MaramuraError, Result};
+use crate::error::{EgerError, Result};
 use crate::render::{self, RenderOutput, RenderTarget};
 use iascii::convert::convert_image;
 use rayon::prelude::*;
@@ -14,9 +14,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Renders a single image file to `target` using `config`.
-///
-/// Synchronous and blocking (decodes + converts on the calling thread) — use
-/// `render_image_file_async` (requires the `video` feature) from async code.
 pub fn render_image_file(
     path: &Path,
     config: &Config,
@@ -39,11 +36,7 @@ pub fn render_dynamic_image(
     render::dispatch(target, &grid, Some(config.color_depth))
 }
 
-/// Async wrapper around [`render_image_file`]. Decoding and ASCII conversion
-/// are both CPU-bound, so the work runs on Tokio's blocking thread pool and
-/// never stalls the async runtime.
-///
-/// Requires the `video` feature (which pulls in `tokio`).
+/// Async wrapper around [`render_image_file`].
 #[cfg(feature = "video")]
 pub async fn render_image_file_async(
     path: PathBuf,
@@ -64,7 +57,7 @@ pub async fn render_image_file_async(
         }
         let pool = builder
             .build()
-            .map_err(|e| MaramuraError::Render(e.to_string()))?;
+            .map_err(|e| EgerError::Render(e.to_string()))?;
 
         let grid = pool.install(|| convert_image(width, height, rgb.as_raw(), &config.ascii))?;
 
@@ -75,9 +68,6 @@ pub async fn render_image_file_async(
 
 /// Renders every file resolved by `config.files()` in parallel on a
 /// dedicated Rayon thread pool sized by `config.num_threads`.
-///
-/// `target_for` chooses the [`RenderTarget`] per input path (e.g. mirror an
-/// output directory, or always return `String`/`Lines`).
 pub fn render_batch_parallel(
     config: &Config,
     target_for: impl Fn(&Path) -> RenderTarget + Sync,
@@ -87,7 +77,7 @@ pub fn render_batch_parallel(
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(config.num_threads)
         .build()
-        .map_err(|e| MaramuraError::Render(e.to_string()))?;
+        .map_err(|e| EgerError::Render(e.to_string()))?;
 
     let results = pool.install(|| {
         files
@@ -103,11 +93,7 @@ pub fn render_batch_parallel(
     Ok(results)
 }
 
-/// Async batch entrypoint: spawns one Tokio task per file so per-file I/O
-/// overlaps, while each task's CPU-bound decode + convert step still runs on
-/// the blocking pool via [`render_image_file_async`].
-///
-/// Requires the `video` feature (which pulls in `tokio`).
+/// Async batch entrypoint.
 #[cfg(feature = "video")]
 pub async fn render_batch_async(
     config: Arc<Config>,
@@ -142,7 +128,7 @@ pub fn image_to_string(path: &Path, config: &Config) -> Result<String> {
     }
 }
 
-/// Convenience: render one image straight to `Vec<String>` (one entry per row).
+/// Convenience: render one image straight to `Vec<String>`.
 pub fn image_to_lines(path: &Path, config: &Config) -> Result<Vec<String>> {
     match render_image_file(path, config, &RenderTarget::Lines)? {
         RenderOutput::Lines(lines) => Ok(lines),
@@ -150,21 +136,15 @@ pub fn image_to_lines(path: &Path, config: &Config) -> Result<Vec<String>> {
     }
 }
 
-/// Convenience: render one image straight to a file — `output` if given,
-/// otherwise `config.output`.
+/// Convenience: render one image straight to a file.
 pub fn image_to_file(path: &Path, config: &Config, output: Option<&Path>) -> Result<PathBuf> {
     let output = output
         .map(Path::to_path_buf)
         .or_else(|| config.output.clone())
-        .ok_or_else(|| MaramuraError::Render("no output path provided or configured".into()))?;
+        .ok_or_else(|| EgerError::Render("no output path provided or configured".into()))?;
 
     match render_image_file(path, config, &RenderTarget::File(output))? {
         RenderOutput::Written(path) => Ok(path),
         _ => unreachable!("RenderTarget::File always yields RenderOutput::Written"),
     }
-}
-
-#[cfg(test)]
-mod tests {
-    // Tests retained verbatim
 }

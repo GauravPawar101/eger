@@ -1,14 +1,14 @@
 [package]
-name = "maramura"
+name = "eger"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Parallel, async image/video -> ASCII-art pipeline built on iascii"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/Gauravpawar101/maramura"
-homepage = "https://github.com/Gauravpawar101/maramura"
-documentation = "https://docs.rs/maramura"
+repository = "https://github.com/Gauravpawar101/eger"
+homepage = "https://github.com/Gauravpawar101/eger"
+documentation = "https://docs.rs/eger"
 keywords = ["ascii", "ascii-art", "terminal", "image", "video"]
 categories = ["multimedia::images", "command-line-utilities"]
 

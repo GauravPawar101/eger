@@ -1,7 +1,7 @@
-//! Error types for `maramura`.
+//! Error types for `eger`.
 //!
 //! [`ConfigError`] covers everything that can go wrong while *building* a
-//! [`crate::config::Config`]. [`MaramuraError`] is the crate-wide error used by
+//! [`crate::config::Config`]. [`EgerError`] is the crate-wide error used by
 //! every rendering/processing API and wraps `ConfigError` alongside I/O,
 //! `iascii`, `image`, `ffmpeg`, and Tokio task failures.
 
@@ -41,9 +41,9 @@ pub enum ConfigError {
     Ascii(#[from] iascii::error::ImageError),
 }
 
-/// The crate-wide error type returned by every `maramura` API.
+/// The crate-wide error type returned by every `eger` API.
 #[derive(Debug, Error)]
-pub enum MaramuraError {
+pub enum EgerError {
     #[error(transparent)]
     Config(#[from] ConfigError),
 
@@ -74,7 +74,7 @@ pub enum MaramuraError {
 }
 
 /// Convenience alias used throughout the crate.
-pub type Result<T> = std::result::Result<T, MaramuraError>;
+pub type Result<T> = std::result::Result<T, EgerError>;
 
 #[cfg(test)]
 mod tests {
@@ -103,27 +103,24 @@ mod tests {
     }
 
     #[test]
-    fn config_error_converts_into_maramura_error() {
+    fn config_error_converts_into_eger_error() {
         let config_err = ConfigError::MissingSource;
-        let maramura_err: MaramuraError = config_err.into();
+        let eger_err: EgerError = config_err.into();
         assert!(matches!(
-            maramura_err,
-            MaramuraError::Config(ConfigError::MissingSource)
+            eger_err,
+            EgerError::Config(ConfigError::MissingSource)
         ));
     }
 
     #[test]
-    fn io_error_converts_into_maramura_error() {
+    fn io_error_converts_into_eger_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "gone");
-        let maramura_err: MaramuraError = io_err.into();
-        assert!(matches!(maramura_err, MaramuraError::Io(_)));
+        let eger_err: EgerError = io_err.into();
+        assert!(matches!(eger_err, EgerError::Io(_)));
     }
 
     #[test]
     fn ffmpeg_error_reports_exit_status_and_stderr() {
-        // ExitStatus has no public cross-platform constructor in stable std
-        // without process::Command, so exercise this indirectly by building
-        // one from a trivial command.
         let status = std::process::Command::new("false").status().or_else(|_| {
             std::process::Command::new("cmd")
                 .arg("/C")
@@ -134,14 +131,14 @@ mod tests {
             eprintln!("skipping: no shell available to produce a failing ExitStatus");
             return;
         };
-        let err = MaramuraError::Ffmpeg(status, "boom".into());
+        let err = EgerError::Ffmpeg(status, "boom".into());
         let msg = err.to_string();
         assert!(msg.contains("boom"));
     }
 
     #[test]
     fn ffmpeg_not_found_has_actionable_message() {
-        let err = MaramuraError::FfmpegNotFound;
+        let err = EgerError::FfmpegNotFound;
         assert!(err.to_string().to_lowercase().contains("ffmpeg"));
         assert!(err.to_string().to_lowercase().contains("path"));
     }

@@ -1,7 +1,7 @@
-# maramura
+# eger
 
 A high-level, parallel ASCII-art media pipeline built on top of [`iascii`].
-`maramura` turns images and (optionally) videos into ASCII/ANSI art, with a
+`eger` turns images and (optionally) videos into ASCII/ANSI art, with a
 fluent configuration API, Rayon-parallel batch processing, and — behind the
 `video` feature — an async, `ffmpeg`-backed video pipeline with terminal
 playback.
@@ -14,7 +14,7 @@ playback.
 | [`image`]      | Single-image and Rayon-parallel batch image → ASCII rendering. Always on.      |
 | [`video`]      | `ffmpeg`-streamed video → ASCII frame sequences, plus terminal playback. `video` feature only. |
 | [`render`]     | Output targets (stdout / file / `String` / `Vec<String>`) and color-depth detection. |
-| [`error`]      | Unified `ConfigError` / `MaramuraError` / `Result`.                              |
+| [`error`]      | Unified `ConfigError` / `egerError` / `Result`.                              |
 
 ## Feature flags
 
@@ -35,20 +35,20 @@ playback.
 
 ```toml
 [dependencies]
-maramura = "0.1"
+eger = "0.1"
 ```
 
 ```rust
-use maramura::prelude::*;
+use eger::prelude::*;
 
-fn run() -> maramura::Result<()> {
+fn run() -> eger::Result<()> {
     let config = Config::builder(MediaType::Image)
         .from_file("cat.png")
         .max_width(120)
         .color_depth(ColorDepth::TrueColor)
         .build()?;
 
-    let ascii = maramura::image_to_string(std::path::Path::new("cat.png"), &config)?;
+    let ascii = eger::image_to_string(std::path::Path::new("cat.png"), &config)?;
     println!("{ascii}");
     Ok(())
 }
@@ -58,9 +58,9 @@ With `features = ["video"]`:
 
 ```rust
 use std::sync::Arc;
-use maramura::prelude::*;
+use eger::prelude::*;
 
-async fn run() -> maramura::Result<()> {
+async fn run() -> eger::Result<()> {
     let config = Arc::new(
         Config::builder(MediaType::Video)
             .from_file("clip.mp4")
@@ -68,7 +68,7 @@ async fn run() -> maramura::Result<()> {
             .num_threads(8)
             .build()?,
     );
-    maramura::play_video(std::path::Path::new("clip.mp4"), config).await
+    eger::play_video(std::path::Path::new("clip.mp4"), config).await
 }
 ```
 
@@ -152,8 +152,8 @@ memory to roughly one chunk of frames at a time while still overlapping the
 - `play_video` — renders and immediately plays back in-terminal at the
   source's native fps, without touching disk.
 
-Every video entry point returns `MaramuraError::FfmpegNotFound` if `ffmpeg`
-isn't on `PATH`, or `MaramuraError::Ffmpeg(status, stderr)` if it runs but
+Every video entry point returns `egerError::FfmpegNotFound` if `ffmpeg`
+isn't on `PATH`, or `egerError::Ffmpeg(status, stderr)` if it runs but
 exits non-zero (e.g. probing a missing/corrupt file).
 
 ## Color depth
@@ -188,7 +188,7 @@ Video tests generate their own tiny synthetic clips at runtime via
 themselves at runtime** (printing a message rather than failing) if
 `ffmpeg`/`ffprobe` aren't found on `PATH`. `image_pipeline.rs` and
 `video_pipeline.rs` are black-box integration tests that only exercise the
-crate's public API (`maramura::prelude::*`), the way an external consumer
+crate's public API (`eger::prelude::*`), the way an external consumer
 would.
 
 ## Known sharp edges

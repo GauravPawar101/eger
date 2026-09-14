@@ -1,4 +1,4 @@
-//! Fluent configuration for `maramura`'s image/video → ASCII pipelines.
+//! Fluent configuration for `eger`'s image/video → ASCII pipelines.
 //!
 //! [`ConfigBuilder`] setters are infallible and chainable; every check (path
 //! existence, regex compilation, `iascii` settings) happens centrally in
@@ -233,7 +233,7 @@ mod tests {
     fn tempdir() -> PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
-            "maramura-config-test-{}-{}",
+            "eger-config-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -373,9 +373,6 @@ mod tests {
         fs::write(dir.join("one"), b"stub").unwrap();
         fs::write(dir.join("two"), b"stub").unwrap();
 
-        // No pattern given via `from_dir`'s 2-arg form is not directly
-        // exercised by the public builder (it always takes a pattern), but
-        // an empty/catch-all pattern should still match everything.
         let config = Config::builder(MediaType::Image)
             .from_dir(&dir, ".*")
             .build()
@@ -384,8 +381,6 @@ mod tests {
         assert_eq!(config.files().unwrap().len(), 2);
         fs::remove_dir_all(&dir).ok();
     }
-
-    // --- output() ------------------------------------------------------
 
     #[test]
     fn output_setter_is_preserved_on_the_built_config() {
@@ -419,17 +414,12 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    // --- from_file / from_dir mutual override ---------------------------
-
     #[test]
     fn calling_from_file_after_from_dir_switches_to_a_single_file_source() {
         let dir = tempdir();
         let file = dir.join("only.png");
         fs::write(&file, b"stub").unwrap();
 
-        // Start down the directory path, then override with `from_file` —
-        // the builder should honor whichever was called last, not merge or
-        // error on the conflicting calls.
         let config = Config::builder(MediaType::Image)
             .from_dir(&dir, r"\.png$")
             .from_file(&file)
@@ -458,13 +448,8 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    // --- num_threads ------------------------------------------------------
-
     #[test]
     fn num_threads_zero_is_preserved_as_given() {
-        // `ConfigBuilder` does not interpret `0` specially — it stores
-        // exactly what the caller passed. Any special meaning (e.g. "let
-        // Rayon pick") is left up to the consuming thread-pool builder.
         let dir = tempdir();
         let file = dir.join("input.png");
         fs::write(&file, b"stub").unwrap();
@@ -478,16 +463,6 @@ mod tests {
         assert_eq!(config.num_threads, 0);
         fs::remove_dir_all(&dir).ok();
     }
-
-    // --- ascii-forwarding builder methods ---------------------------------
-    //
-    // `ramp`, `luminance_method`, `aspect_ratio_correction`, and
-    // `parallel_threshold` all just forward into the wrapped
-    // `iascii::config::ConfigBuilder`. `iascii::config::Config` doesn't
-    // expose these back out as public fields, so these tests only confirm
-    // that chaining each one still produces a successfully built `Config`
-    // (i.e. no setter accidentally invalidates the builder) rather than
-    // inspecting the resulting `iascii` internals directly.
 
     #[test]
     fn ramp_luminance_aspect_and_parallel_threshold_setters_all_chain_and_build() {
@@ -527,8 +502,6 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    // --- MediaType ---------------------------------------------------------
-
     #[test]
     fn media_type_is_preserved_through_build() {
         let dir = tempdir();
@@ -549,8 +522,6 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    // --- regex edge cases ---------------------------------------------------
-
     #[test]
     fn directory_pattern_matching_is_case_sensitive() {
         let dir = tempdir();
@@ -570,7 +541,7 @@ mod tests {
     #[test]
     fn directory_source_ignores_subdirectories_even_if_name_matches() {
         let dir = tempdir();
-        let nested = dir.join("frame.png"); // a directory, not a file
+        let nested = dir.join("frame.png");
         fs::create_dir_all(&nested).unwrap();
         let real_file = dir.join("real.png");
         fs::write(&real_file, b"stub").unwrap();

@@ -1,14 +1,14 @@
 //! Black-box integration tests for the image → ASCII pipeline: only
-//! `maramura`'s public API (as re-exported from `maramura::prelude`) is used,
+//! `eger`'s public API (as re-exported from `eger::prelude`) is used,
 //! the way an external consumer of the crate would use it.
 
-use maramura::prelude::*;
+use eger::prelude::*;
 use std::path::PathBuf;
 
 fn temp_path(name: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "maramura-it-{}-{}-{name}",
+        "eger-it-{}-{}-{name}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -41,7 +41,7 @@ fn end_to_end_image_to_string_via_public_builder() {
         .build()
         .expect("config should build for a real file");
 
-    let ascii = maramura::image_to_string(&input, &config).expect("rendering should succeed");
+    let ascii = eger::image_to_string(&input, &config).expect("rendering should succeed");
     assert!(!ascii.is_empty());
     // A checkerboard should render more than one distinct character.
     assert!(
@@ -69,7 +69,7 @@ fn end_to_end_image_to_file_round_trip() {
         .build()
         .unwrap();
 
-    let written = maramura::image_to_file(&input, &config, None).unwrap();
+    let written = eger::image_to_file(&input, &config, None).unwrap();
     assert_eq!(written, output);
     let contents = std::fs::read_to_string(&output).unwrap();
     assert!(!contents.is_empty());
@@ -95,7 +95,7 @@ fn batch_directory_pipeline_processes_all_matching_files_in_parallel() {
         .build()
         .unwrap();
 
-    let results = maramura::render_batch_parallel(&config, |_| RenderTarget::String).unwrap();
+    let results = eger::render_batch_parallel(&config, |_| RenderTarget::String).unwrap();
     assert_eq!(results.len(), 8);
     for (path, outcome) in &results {
         assert!(
@@ -124,7 +124,7 @@ async fn async_batch_pipeline_matches_sync_batch_pipeline_file_count() {
             .unwrap(),
     );
 
-    let results = maramura::render_batch_async(config, |_| RenderTarget::String)
+    let results = eger::render_batch_async(config, |_| RenderTarget::String)
         .await
         .unwrap();
     assert_eq!(results.len(), 5);
@@ -179,8 +179,8 @@ fn color_depth_setting_changes_output_encoding_end_to_end() {
         .build()
         .unwrap();
 
-    let truecolor_out = maramura::image_to_string(&input, &truecolor_config).unwrap();
-    let ansi16_out = maramura::image_to_string(&input, &ansi16_config).unwrap();
+    let truecolor_out = eger::image_to_string(&input, &truecolor_config).unwrap();
+    let ansi16_out = eger::image_to_string(&input, &ansi16_config).unwrap();
 
     // `image_to_string` (and every other convenience helper in `image.rs`)
     // always renders through `Some(config.color_depth)` — there's no plain,
@@ -213,7 +213,7 @@ fn single_file_input_via_from_dir_pattern_matching_only_that_file() {
     let files = config.files().unwrap();
     assert_eq!(files, vec![dir.join("keep.png")]);
 
-    let results = maramura::render_batch_parallel(&config, |_| RenderTarget::String).unwrap();
+    let results = eger::render_batch_parallel(&config, |_| RenderTarget::String).unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].1.is_ok());
 
@@ -240,7 +240,7 @@ fn stress_large_batch_with_constrained_thread_pool() {
         .build()
         .unwrap();
 
-    let results = maramura::render_batch_parallel(&config, |_| RenderTarget::String).unwrap();
+    let results = eger::render_batch_parallel(&config, |_| RenderTarget::String).unwrap();
     assert_eq!(results.len(), N);
 
     let mut seen = std::collections::HashSet::new();
