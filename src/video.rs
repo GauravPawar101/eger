@@ -1,16 +1,17 @@
-//! Video → ASCII rendering.
+//! Video → ASCII rendering with bounded memory frame streaming.
 
 use crate::config::Config;
 use crate::error::{EgerError, Result};
-use crate::render::{self, play_terminal};
+use crate::render;
 use iascii::convert::convert_image;
 use iascii::render::ColorDepth;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
 
 /// Basic video stream metadata needed to drive frame extraction.
 #[derive(Debug, Clone, Copy)]
@@ -92,12 +93,16 @@ async fn spawn_frame_stream(path: &Path) -> Result<Child> {
         .map_err(|_| EgerError::FfmpegNotFound)
 }
 
-/// Converts an entire video into a sequence of rendered ASCII frames.
-pub async fn render_video_frames(
+/// Streams converted ASCII frame batches over a bounded `mpsc` channel.
+///
+/// Limits memory usage to active worker chunk buffers rather than holding the entire
+/// video's rendered frames in memory.
+pub async fn stream_video_frames(
     path: &Path,
     config: Arc<Config>,
     depth_override: Option<ColorDepth>,
-) -> Result<Vec<String>> {
+    tx: mpsc::Sender<Result<Vec<String>>>,
+) -> Result<()> {
     let info = probe(path).await?;
     let frame_bytes = (info.width as usize) * (info.height as usize) * 3;
     if frame_bytes == 0 {
@@ -112,7 +117,6 @@ pub async fn render_video_frames(
 
     let color_depth = depth_override.unwrap_or(config.color_depth);
     let chunk_size = (config.num_threads * 4).max(1);
-    let mut rendered = Vec::with_capacity(info.frame_count.unwrap_or(0) as usize);
 
     let mut pool_builder = rayon::ThreadPoolBuilder::new();
     if config.num_threads > 0 {
@@ -140,7 +144,10 @@ pub async fn render_video_frames(
         let is_last = chunk.len() < chunk_size;
 
         if let Some(handle) = pending.take() {
-            rendered.extend(handle.await??);
+            let frames = handle.await??;
+            if tx.send(Ok(frames)).await.is_err() {
+                break; // Receiver was dropped by consumer
+            }
         }
 
         if chunk.is_empty() {
@@ -171,7 +178,8 @@ pub async fn render_video_frames(
     }
 
     if let Some(handle) = pending.take() {
-        rendered.extend(handle.await??);
+        let frames = handle.await??;
+        let _ = tx.send(Ok(frames)).await;
     }
 
     let status = child.wait().await?;
@@ -182,6 +190,32 @@ pub async fn render_video_frames(
         ));
     }
 
+    Ok(())
+}
+
+/// Renders all video frames into memory.
+///
+/// **Warning:** Prefer [`video_to_file`], [`play_video`], or [`stream_video_frames`]
+/// for large files to prevent OOM errors.
+pub async fn render_video_frames(
+    path: &Path,
+    config: Arc<Config>,
+    depth_override: Option<ColorDepth>,
+) -> Result<Vec<String>> {
+    let (tx, mut rx) = mpsc::channel(4);
+    let path_buf = path.to_path_buf();
+    let stream_task =
+        tokio::spawn(
+            async move { stream_video_frames(&path_buf, config, depth_override, tx).await },
+        );
+
+    let mut rendered = Vec::new();
+    while let Some(chunk_res) = rx.recv().await {
+        let chunk = chunk_res?;
+        rendered.extend(chunk);
+    }
+
+    stream_task.await??;
     Ok(rendered)
 }
 
@@ -189,6 +223,7 @@ pub async fn video_to_lines(path: &Path, config: Arc<Config>) -> Result<Vec<Stri
     render_video_frames(path, config, None).await
 }
 
+/// Streams and writes ASCII frame chunks directly to an output file using a buffered writer.
 pub async fn video_to_file(
     path: &Path,
     config: Arc<Config>,
@@ -199,14 +234,55 @@ pub async fn video_to_file(
         .or_else(|| config.output.clone())
         .ok_or_else(|| EgerError::Render("no output path provided or configured".into()))?;
 
-    let frames = render_video_frames(path, config, None).await?;
-    let joined = frames.join("\n\x1E\n");
-    tokio::fs::write(&output, joined).await?;
+    let file = tokio::fs::File::create(&output).await?;
+    let mut writer = BufWriter::new(file);
+
+    let (tx, mut rx) = mpsc::channel(4);
+    let path_buf = path.to_path_buf();
+    let stream_task =
+        tokio::spawn(async move { stream_video_frames(&path_buf, config, None, tx).await });
+
+    let mut first = true;
+    while let Some(chunk_res) = rx.recv().await {
+        let chunk = chunk_res?;
+        for frame in chunk {
+            if !first {
+                writer.write_all(b"\n\x1E\n").await?;
+            }
+            first = false;
+            writer.write_all(frame.as_bytes()).await?;
+        }
+    }
+    writer.flush().await?;
+
+    stream_task.await??;
     Ok(output)
 }
 
+/// Streams frames directly to stdout for terminal playback without buffering the whole file in RAM.
 pub async fn play_video(path: &Path, config: Arc<Config>) -> Result<()> {
     let info = probe(path).await?;
-    let frames = render_video_frames(path, config, None).await?;
-    play_terminal(&frames, info.fps).await
+    if !(info.fps > 0.0) {
+        return Err(EgerError::Render("fps must be positive".into()));
+    }
+    let frame_delay = std::time::Duration::from_secs_f64(1.0 / info.fps);
+    let mut stdout = tokio::io::stdout();
+
+    let (tx, mut rx) = mpsc::channel(4);
+    let path_buf = path.to_path_buf();
+    let stream_task =
+        tokio::spawn(async move { stream_video_frames(&path_buf, config, None, tx).await });
+
+    while let Some(chunk_res) = rx.recv().await {
+        let chunk = chunk_res?;
+        for frame in chunk {
+            stdout.write_all(b"\x1B[H\x1B[2J").await?;
+            stdout.write_all(frame.as_bytes()).await?;
+            stdout.flush().await?;
+            tokio::time::sleep(frame_delay).await;
+        }
+    }
+
+    stream_task.await??;
+    Ok(())
 }

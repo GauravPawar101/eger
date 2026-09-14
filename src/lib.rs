@@ -54,7 +54,8 @@ pub use crate::image::{render_batch_async, render_image_file_async};
 pub use crate::render::{detect_render_depth, RenderOutput, RenderTarget};
 #[cfg(feature = "video")]
 pub use crate::video::{
-    play_video, probe, render_video_frames, video_to_file, video_to_lines, VideoInfo,
+    play_video, probe, render_video_frames, stream_video_frames, video_to_file, video_to_lines,
+    VideoInfo,
 };
 
 /// Everything needed to configure and drive `eger` in one `use`.
