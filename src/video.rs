@@ -98,18 +98,18 @@ async fn spawn_frame_stream(path: &Path) -> Result<Child> {
 /// Limits memory usage to active worker chunk buffers rather than holding the entire
 /// video's rendered frames in memory.
 pub async fn stream_video_frames(
-    path: &Path,
+    path: PathBuf,
     config: Arc<Config>,
     depth_override: Option<ColorDepth>,
     tx: mpsc::Sender<Result<Vec<String>>>,
 ) -> Result<()> {
-    let info = probe(path).await?;
+    let info = probe(&path).await?;
     let frame_bytes = (info.width as usize) * (info.height as usize) * 3;
     if frame_bytes == 0 {
         return Err(EgerError::Video("video has a zero-sized frame".into()));
     }
 
-    let mut child = spawn_frame_stream(path).await?;
+    let mut child = spawn_frame_stream(&path).await?;
     let mut stdout = child
         .stdout
         .take()
@@ -118,15 +118,17 @@ pub async fn stream_video_frames(
     let color_depth = depth_override.unwrap_or(config.color_depth);
     let chunk_size = (config.num_threads * 4).max(1);
 
-    let mut pool_builder = rayon::ThreadPoolBuilder::new();
-    if config.num_threads > 0 {
-        pool_builder = pool_builder.num_threads(config.num_threads);
-    }
-    let pool = Arc::new(
-        pool_builder
+    // Confining `ThreadPoolBuilder` to an isolated scope block prevents its `!Send`
+    // internal closures from crossing `.await` yield points in the loop below.
+    let pool = Arc::new({
+        let mut builder = rayon::ThreadPoolBuilder::new();
+        if config.num_threads > 0 {
+            builder = builder.num_threads(config.num_threads);
+        }
+        builder
             .build()
-            .map_err(|e| EgerError::Video(e.to_string()))?,
-    );
+            .map_err(|e| EgerError::Video(e.to_string()))?
+    });
 
     type ConversionHandle = tokio::task::JoinHandle<Result<Vec<String>>>;
     let mut pending: Option<ConversionHandle> = None;
@@ -206,7 +208,7 @@ pub async fn render_video_frames(
     let path_buf = path.to_path_buf();
     let stream_task =
         tokio::spawn(
-            async move { stream_video_frames(&path_buf, config, depth_override, tx).await },
+            async move { stream_video_frames(path_buf, config, depth_override, tx).await },
         );
 
     let mut rendered = Vec::new();
@@ -240,7 +242,7 @@ pub async fn video_to_file(
     let (tx, mut rx) = mpsc::channel(4);
     let path_buf = path.to_path_buf();
     let stream_task =
-        tokio::spawn(async move { stream_video_frames(&path_buf, config, None, tx).await });
+        tokio::spawn(async move { stream_video_frames(path_buf, config, None, tx).await });
 
     let mut first = true;
     while let Some(chunk_res) = rx.recv().await {
@@ -271,7 +273,7 @@ pub async fn play_video(path: &Path, config: Arc<Config>) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(4);
     let path_buf = path.to_path_buf();
     let stream_task =
-        tokio::spawn(async move { stream_video_frames(&path_buf, config, None, tx).await });
+        tokio::spawn(async move { stream_video_frames(path_buf, config, None, tx).await });
 
     while let Some(chunk_res) = rx.recv().await {
         let chunk = chunk_res?;
