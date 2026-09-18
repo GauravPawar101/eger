@@ -1,43 +1,92 @@
 [package]
 name = "eger"
-version = "0.1.2"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.80"
-description = "Parallel, async image/video -> ASCII-art pipeline built on iascii"
+description = "Parallel, async ASCII-art pipeline for images, GIFs and video, plus text/banner animation and a WASM binding — for TUIs, terminal games, terminal video players, and browser ASCII art"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/Gauravpawar101/eger"
 homepage = "https://github.com/Gauravpawar101/eger"
 documentation = "https://docs.rs/eger"
-keywords = ["ascii", "ascii-art", "terminal", "image", "video"]
-categories = ["multimedia::images", "command-line-utilities"]
+# crates.io caps this list at 5 entries, so these are picked to cover the
+# broadest set of things people actually search for when looking for this
+# kind of crate (terminal UIs, ASCII games, WASM ASCII art), rather than
+# restating "image"/"video" here — those are already covered by
+# `categories` below and by "ascii-art" itself, and are searched via the
+# full-text index of `description` regardless.
+keywords = ["ascii-art", "terminal", "tui", "game", "wasm"]
+categories = [
+    "multimedia::images",
+    "multimedia::video",
+    "command-line-utilities",
+    "rendering",
+    "wasm",
+]
 
 [dependencies]
-# "parallel" enables iascii's internal Rayon-powered row conversion
-# (controlled per-Config via `parallel_threshold`).
-iascii = { version = "0.1.2", features = ["parallel"] }
+# iascii's own "parallel" feature (which pulls in rayon on iascii's side and
+# exposes `convert_with_pool`) is left OFF here and instead re-exposed as our
+# own `parallel` feature below (`parallel = ["iascii/parallel"]`), so turning
+# it on/off doesn't require touching this line — see the [features] table.
+iascii = "0.1.2"
 
 image = { version = "0.24", default-features = false, features = [
     "png", "jpeg", "gif", "bmp",
 ] }
 
+rayon = "1.10"
+regex = "1"
+terminal_size = "0.4"
+thiserror = "1"
+
 # Only pulled in by the `video` feature: video streaming/playback is the
 # only thing in this crate that needs an async runtime. Plain image
 # rendering (including the Rayon-parallel batch path) never touches tokio.
+#
+# Deliberately NOT "full": eger is a library that runs inside the caller's
+# own async context rather than spinning up its own runtime, so it never
+# needs "rt-multi-thread" or "macros" (those move to dev-dependencies below,
+# where they back this crate's own #[tokio::test]s) — every feature listed
+# here is used somewhere under src/.
 tokio = { version = "1", features = [
-    "rt-multi-thread", "macros", "process", "fs", "io-util", "io-std", "time", "sync",
+    "rt", "process", "fs", "io-util", "io-std", "time", "sync",
 ], optional = true }
 
-rayon = "1.10"
-regex = "1"
-thiserror = "1"
+wasm-bindgen = { version = "0.2", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "image_conversion"
+harness = false
+
+[[bench]]
+name = "batch_rendering"
+harness = false
+
+[[bench]]
+name = "animation"
+harness = false
+
+[[bench]]
+# Compiles and runs (printing a "skipped" message) even without the
+# `video` feature/ffmpeg on PATH — see benches/video_streaming.rs — so this
+# is intentionally not gated with `required-features`.
+name = "video_streaming"
+harness = false
 
 [features]
-default = []
-# ffmpeg/ffprobe-backed video -> ASCII pipeline, terminal playback, and the
-# async (`_async`) image/render helpers that share tokio with it. Rayon-based
-# parallel batch image rendering does NOT require this — it's always on.
+default = ["parallel"]
 video = ["dep:tokio"]
+wasm = ["dep:wasm-bindgen"]
+# Row-level parallel image conversion for a *single* image/frame, via
+# iascii's `convert_with_pool` (gated behind iascii's own "parallel"
+# feature, which this forwards to). Distinct from — and complementary to —
+# the always-on Rayon parallelism in `image::render_batch_parallel` and
+# `video::stream_video_frames`, which parallelize *across* files/frames
+# instead of *within* one. See image.rs's module docs for which paths use
+# which kind of parallelism and why.
+parallel = ["iascii/parallel"]

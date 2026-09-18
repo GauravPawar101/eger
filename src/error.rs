@@ -39,6 +39,9 @@ pub enum ConfigError {
 
     #[error("invalid ASCII rendering configuration: {0}")]
     Ascii(#[from] iascii::error::ImageError),
+
+    #[error("failed to build thread pool: {0}")]
+    ThreadPool(String),
 }
 
 /// The crate-wide error type returned by every `eger` API.
@@ -71,6 +74,15 @@ pub enum EgerError {
 
     #[error("render error: {0}")]
     Render(String),
+
+    #[error("animation error: {0}")]
+    Animation(String),
+
+    #[error("failed to spawn animation program: {0}")]
+    AnimationSpawn(#[source] std::io::Error),
+
+    #[error("animation program exited with {0}: {1}")]
+    AnimationProgram(ExitStatus, String),
 }
 
 /// Convenience alias used throughout the crate.
@@ -141,5 +153,18 @@ mod tests {
         let err = EgerError::FfmpegNotFound;
         assert!(err.to_string().to_lowercase().contains("ffmpeg"));
         assert!(err.to_string().to_lowercase().contains("path"));
+    }
+
+    #[test]
+    fn animation_spawn_error_wraps_the_source_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "no such program");
+        let err = EgerError::AnimationSpawn(io_err);
+        assert!(err.to_string().to_lowercase().contains("spawn"));
+    }
+
+    #[test]
+    fn thread_pool_config_error_message_includes_the_detail() {
+        let err = ConfigError::ThreadPool("bogus thread count".into());
+        assert!(err.to_string().contains("bogus thread count"));
     }
 }

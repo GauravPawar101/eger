@@ -100,6 +100,144 @@ fn detect_render_depth_from(
     Some(ColorDepth::Ansi16)
 }
 
+/// Queries the current terminal's size in columns/rows, if stdout is
+/// attached to one. Returns `None` when output is piped/redirected or the
+/// size can't be determined (e.g. no controlling terminal, as in most CI
+/// environments).
+///
+/// Backed by the `terminal_size` crate (`terminal_size::terminal_size`),
+/// which reads the size via the platform's own mechanism (`ioctl(TIOCGWINSZ)`
+/// on Unix, the console API on Windows) rather than environment variables,
+/// so it stays correct across resizes without needing `SIGWINCH` handling.
+pub fn terminal_size() -> Option<(u16, u16)> {
+    terminal_size::terminal_size().map(|(terminal_size::Width(w), terminal_size::Height(h))| (w, h))
+}
+
+/// Controls how finely [`diff_frame`] repaints one frame over another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffGranularity {
+    /// Redraw an entire line whenever any byte in it changed. Safe for
+    /// ANSI-colored frames: an SGR color escape anywhere in the line
+    /// changes its raw bytes even when the visible glyphs it wraps are
+    /// unchanged, so cell-level diffing would misread it as a content
+    /// change at the wrong column. This is the granularity to reach for
+    /// unless you know your frames are plain, uncolored text.
+    Line,
+    /// Redraw only the individual character cells that changed within a
+    /// line, computed by comparing the two lines' `char`s position by
+    /// position. Only correct for plain (uncolored / no embedded escape
+    /// sequences) frames — with ANSI escapes present, `char` position no
+    /// longer lines up with the visible terminal column, and the emitted
+    /// cursor moves would land in the wrong place.
+    Cell,
+}
+
+/// Computes the minimal set of cursor-addressed writes needed to repaint
+/// `next` over a terminal currently showing `prev`, instead of clearing and
+/// redrawing the whole frame (as [`play_terminal`]/[`dispatch`]'s `Stdout`
+/// target and [`crate::video::play_video`] do). Returns an empty string
+/// when the two frames are identical.
+///
+/// Both frames are compared line by line (via `str::lines`); see
+/// [`DiffGranularity`] for the tradeoff between the two granularities this
+/// accepts.
+pub fn diff_frame(prev: &str, next: &str, granularity: DiffGranularity) -> String {
+    let prev_lines: Vec<&str> = prev.lines().collect();
+    let next_lines: Vec<&str> = next.lines().collect();
+    let max_lines = prev_lines.len().max(next_lines.len());
+
+    let mut out = String::new();
+    for row in 0..max_lines {
+        let prev_line = prev_lines.get(row).copied().unwrap_or("");
+        let next_line = next_lines.get(row).copied().unwrap_or("");
+        if prev_line == next_line {
+            continue;
+        }
+        match granularity {
+            DiffGranularity::Line => {
+                // \x1B[<row>;1H moves the cursor to the start of the row
+                // (1-based); \x1B[K clears from the cursor to end-of-line
+                // first so a next_line shorter than prev_line doesn't leave
+                // stale trailing characters behind.
+                out.push_str(&format!("\x1B[{};1H\x1B[K{next_line}", row + 1));
+            }
+            DiffGranularity::Cell => diff_row_cells(row, prev_line, next_line, &mut out),
+        }
+    }
+    out
+}
+
+/// Appends the cursor-addressed writes needed to turn `prev_line` into
+/// `next_line` on terminal row `row` (0-based) into `out`, changing only
+/// the contiguous spans of characters that actually differ.
+fn diff_row_cells(row: usize, prev_line: &str, next_line: &str, out: &mut String) {
+    let prev_chars: Vec<char> = prev_line.chars().collect();
+    let next_chars: Vec<char> = next_line.chars().collect();
+    let max_len = prev_chars.len().max(next_chars.len());
+
+    let mut col = 0;
+    while col < max_len {
+        let p = prev_chars.get(col).copied();
+        let n = next_chars.get(col).copied();
+        if p == n {
+            col += 1;
+            continue;
+        }
+        let start = col;
+        let mut span = String::new();
+        while col < max_len && prev_chars.get(col).copied() != next_chars.get(col).copied() {
+            span.push(next_chars.get(col).copied().unwrap_or(' '));
+            col += 1;
+        }
+        // Columns are 1-based in cursor-position escapes.
+        out.push_str(&format!("\x1B[{};{}H{span}", row + 1, start + 1));
+    }
+    // next_line ran out before prev_line did: clear the leftover tail.
+    if next_chars.len() < prev_chars.len() {
+        out.push_str(&format!("\x1B[{};{}H\x1B[K", row + 1, next_chars.len() + 1));
+    }
+}
+
+/// Plays back a sequence of already-rendered frames using cursor-addressed
+/// diffing instead of [`play_terminal`]'s clear-and-redraw-every-frame
+/// approach — much less flicker for animations where most of the frame is
+/// unchanged between steps (a spinner, a status line, a slowly-panning
+/// image). The first frame is always drawn in full; every frame after that
+/// is patched in via [`diff_frame`].
+#[cfg(feature = "video")]
+pub async fn play_terminal_diffed(
+    frames: &[String],
+    fps: f64,
+    granularity: DiffGranularity,
+) -> Result<()> {
+    if !(fps > 0.0) {
+        return Err(EgerError::Render("fps must be positive".into()));
+    }
+    let Some((first, rest)) = frames.split_first() else {
+        return Ok(());
+    };
+
+    let frame_delay = Duration::from_secs_f64(1.0 / fps);
+    let mut stdout = tokio::io::stdout();
+
+    stdout.write_all(b"\x1B[H\x1B[2J").await?;
+    stdout.write_all(first.as_bytes()).await?;
+    stdout.flush().await?;
+    tokio::time::sleep(frame_delay).await;
+
+    let mut prev = first;
+    for next in rest {
+        let patch = diff_frame(prev, next, granularity);
+        if !patch.is_empty() {
+            stdout.write_all(patch.as_bytes()).await?;
+            stdout.flush().await?;
+        }
+        prev = next;
+        tokio::time::sleep(frame_delay).await;
+    }
+    Ok(())
+}
+
 /// Dispatches a rendered `Grid` to `target`, synchronously.
 pub fn dispatch(
     target: &RenderTarget,
@@ -284,6 +422,63 @@ mod tests {
             detect_render_depth_from(false, None, Some("xterm".into()), true),
             Some(ColorDepth::Ansi16)
         );
+    }
+
+    #[test]
+    fn diff_frame_is_empty_for_identical_frames() {
+        let a = "line one\nline two\n";
+        assert_eq!(diff_frame(a, a, DiffGranularity::Line), "");
+        assert_eq!(diff_frame(a, a, DiffGranularity::Cell), "");
+    }
+
+    #[test]
+    fn diff_frame_line_granularity_only_touches_changed_rows() {
+        let prev = "same\nold\nsame";
+        let next = "same\nnew\nsame";
+        let patch = diff_frame(prev, next, DiffGranularity::Line);
+        assert!(patch.contains("new"));
+        assert!(!patch.contains("old"));
+        // Only row 2 (1-based) should have been addressed.
+        assert!(patch.contains("\x1B[2;1H"));
+        assert!(!patch.contains("\x1B[1;1H"));
+        assert!(!patch.contains("\x1B[3;1H"));
+    }
+
+    #[test]
+    fn diff_frame_cell_granularity_only_rewrites_the_changed_span() {
+        let prev = "abcXXXghi";
+        let next = "abcYYYghi";
+        let patch = diff_frame(prev, next, DiffGranularity::Cell);
+        assert!(patch.contains("YYY"));
+        // The unchanged prefix/suffix characters should not be re-sent.
+        assert!(!patch.contains("abcYYY"));
+        assert!(!patch.contains("YYYghi"));
+    }
+
+    #[test]
+    fn diff_frame_cell_granularity_clears_a_shrunk_line_tail() {
+        let prev = "hello world";
+        let next = "hello";
+        let patch = diff_frame(prev, next, DiffGranularity::Cell);
+        // Should clear starting right after "hello" (column 6).
+        assert!(patch.contains("\x1B[1;6H\x1B[K"));
+    }
+
+    #[test]
+    fn diff_frame_handles_frames_with_different_line_counts() {
+        let prev = "a\nb\nc";
+        let next = "a\nb";
+        let patch = diff_frame(prev, next, DiffGranularity::Line);
+        // Row 3 existed in prev but not next; next_line is "" there, so it
+        // should be cleared via the line-granularity path.
+        assert!(patch.contains("\x1B[3;1H\x1B[K"));
+    }
+
+    #[test]
+    fn terminal_size_does_not_panic_without_a_real_terminal() {
+        // In a headless test runner stdout usually isn't a TTY, so this
+        // should return None rather than erroring.
+        let _ = terminal_size();
     }
 
     #[test]

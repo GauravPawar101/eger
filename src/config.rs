@@ -13,6 +13,7 @@ use iascii::ramp::RampType;
 use iascii::render::ColorDepth;
 use regex::Regex;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 /// Whether a [`Config`] describes an image or a video pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +34,6 @@ pub enum InputSource {
 ///
 /// Cheap to share across threads/tasks behind an `Arc<Config>` — build it
 /// once and reuse it for every file in a batch or every frame of a video.
-#[derive(Debug)]
 pub struct Config {
     pub media_type: MediaType,
     pub source: InputSource,
@@ -41,12 +41,61 @@ pub struct Config {
     pub num_threads: usize,
     pub color_depth: ColorDepth,
     pub ascii: AsciiConfig,
+    /// Lazily-built Rayon pool shared by every call site that uses this
+    /// `Config` (single-image, batch, and video frame conversion), so the
+    /// pool is constructed at most once per `Config` instead of once per
+    /// file/frame. See [`Config::thread_pool`].
+    thread_pool: OnceLock<Arc<rayon::ThreadPool>>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("media_type", &self.media_type)
+            .field("source", &self.source)
+            .field("output", &self.output)
+            .field("num_threads", &self.num_threads)
+            .field("color_depth", &self.color_depth)
+            .field("ascii", &self.ascii)
+            .field(
+                "thread_pool",
+                &self.thread_pool.get().map(|_| "<initialized>"),
+            )
+            .finish()
+    }
 }
 
 impl Config {
     /// Starts building a new configuration for the given media type.
     pub fn builder(media_type: MediaType) -> ConfigBuilder {
         ConfigBuilder::new(media_type)
+    }
+
+    /// Returns the Rayon thread pool for this `Config`, building it on first
+    /// use and reusing it for every subsequent call. Sized from
+    /// [`Config::num_threads`] (0 means Rayon's own default).
+    ///
+    /// Call sites that used to build a fresh `ThreadPool` per file/frame
+    /// (image batches, async single-image rendering, video streaming)
+    /// should call this instead so the pool — and its worker OS threads —
+    /// is created once per `Config` and shared.
+    pub fn thread_pool(&self) -> Result<&Arc<rayon::ThreadPool>, ConfigError> {
+        if self.thread_pool.get().is_none() {
+            let mut builder = rayon::ThreadPoolBuilder::new();
+            if self.num_threads > 0 {
+                builder = builder.num_threads(self.num_threads);
+            }
+            let pool = builder
+                .build()
+                .map_err(|e| ConfigError::ThreadPool(e.to_string()))?;
+            // If another thread raced us and already initialized the pool,
+            // just discard the one we built; OnceLock::set is a no-op then.
+            let _ = self.thread_pool.set(Arc::new(pool));
+        }
+        Ok(self
+            .thread_pool
+            .get()
+            .expect("thread pool was just initialized above"))
     }
 
     /// Resolves [`InputSource`] into the concrete list of files to process,
@@ -85,6 +134,11 @@ impl Config {
 }
 
 /// Builder for [`Config`].
+///
+/// `#[must_use]` on the type (rather than on each setter) catches the whole
+/// class of "called `.output(...)` but forgot to reassign/chain it" bugs in
+/// one place, since every setter returns `Self`.
+#[must_use]
 pub struct ConfigBuilder {
     media_type: MediaType,
     path: Option<PathBuf>,
@@ -152,6 +206,25 @@ impl ConfigBuilder {
         self
     }
 
+    /// Like [`ConfigBuilder::max_width`], but detects the cap from the
+    /// current terminal's column count (via [`crate::render::terminal_size`])
+    /// instead of taking a fixed number, so images/frames fit the terminal
+    /// they're actually about to be printed to without the caller having to
+    /// hardcode a width.
+    ///
+    /// Falls back to `fallback` when there's no attached terminal to query
+    /// (output is piped/redirected, e.g. `eger-cli cat.png | less`) or its
+    /// size can't be determined. Detection happens immediately when this is
+    /// called, not lazily at [`ConfigBuilder::build`] — call it right
+    /// before `build()` if the terminal might be resized in between.
+    pub fn auto_width(mut self, fallback: usize) -> Self {
+        let width = crate::render::terminal_size()
+            .map(|(cols, _rows)| cols as usize)
+            .unwrap_or(fallback);
+        self.ascii = self.ascii.output_sizing(OutputSizing::MaxWidth(width));
+        self
+    }
+
     /// Fixes output width and height explicitly.
     pub fn explicit_dimensions(mut self, width: usize, height: usize) -> Self {
         self.ascii = self
@@ -213,6 +286,7 @@ impl ConfigBuilder {
             num_threads: self.num_threads.unwrap_or_else(default_parallelism),
             color_depth: self.color_depth,
             ascii,
+            thread_pool: OnceLock::new(),
         })
     }
 }
@@ -535,6 +609,28 @@ mod tests {
 
         let files = config.files().unwrap();
         assert_eq!(files, vec![dir.join("frame.png")]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn thread_pool_is_built_lazily_and_reused_across_calls() {
+        let dir = tempdir();
+        let file = dir.join("input.png");
+        fs::write(&file, b"stub").unwrap();
+
+        let config = Config::builder(MediaType::Image)
+            .from_file(&file)
+            .num_threads(2)
+            .build()
+            .unwrap();
+
+        let first = config.thread_pool().unwrap();
+        let second = config.thread_pool().unwrap();
+        assert!(
+            Arc::ptr_eq(first, second),
+            "second call should reuse the pool built by the first"
+        );
+        assert_eq!(first.current_num_threads(), 2);
         fs::remove_dir_all(&dir).ok();
     }
 

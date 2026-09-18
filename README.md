@@ -1,219 +1,265 @@
 # eger
 
-A high-level, parallel ASCII-art media pipeline built on top of [`iascii`].
-`eger` turns images and (optionally) videos into ASCII/ANSI art, with a
-fluent configuration API, Rayon-parallel batch processing, and — behind the
-`video` feature — an async, `ffmpeg`-backed video pipeline with terminal
-playback.
+**A parallel, async image/video → ASCII-art pipeline for Rust**, built on top of
+[`iascii`](https://crates.io/crates/iascii). `eger` turns images, animated GIFs,
+and video into colored (or plain) ASCII/ANSI text, and gives you the building
+blocks to *animate* text and render big block-letter banners — everything you
+need to build a TUI status screen, an ASCII game, a terminal video player, or
+a WASM-powered ASCII renderer for the browser.
 
-## At a glance
+```rust
+use eger::prelude::*;
 
-| Module         | Responsibility                                                                 |
-| -------------- | ------------------------------------------------------------------------------- |
-| [`config`]     | Fluent `Config`/`ConfigBuilder`: input source, sizing, color, parallelism.      |
-| [`image`]      | Single-image and Rayon-parallel batch image → ASCII rendering. Always on.      |
-| [`video`]      | `ffmpeg`-streamed video → ASCII frame sequences, plus terminal playback. `video` feature only. |
-| [`render`]     | Output targets (stdout / file / `String` / `Vec<String>`) and color-depth detection. |
-| [`error`]      | Unified `ConfigError` / `egerError` / `Result`.                              |
+let config = Config::builder(MediaType::Image)
+    .from_file("cat.png")
+    .max_width(120)
+    .color_depth(ColorDepth::TrueColor)
+    .build()?;
+
+let ascii = eger::image_to_string(std::path::Path::new("cat.png"), &config)?;
+println!("{ascii}");
+```
+
+## Why `eger`
+
+- **One conversion path, several entry points.** Single image, `Vec<String>`,
+  a file, a batch of files, an animated GIF, or a live video stream — they
+  all funnel through the same `iascii`-backed conversion, so sizing,
+  luminance, ramp, and color settings behave identically everywhere.
+- **Two kinds of parallelism, used deliberately.** Rayon parallelizes
+  *across* files/frames in batch and video pipelines (always on), and
+  optionally *within* a single large conversion (row-level, via the
+  `parallel` feature) — see [Parallelism](#parallelism) below.
+- **A real animation layer, not just a converter.** `text` and `banner` give
+  you `Typewriter`, `Rainbow`, `Wave`, `Blink`, `Marquee`, `Pulse`, and
+  fully custom (subprocess- or closure-driven) animations, usable for
+  loading indicators, TUI headers, game title screens, or animated banners.
+- **Terminal-friendly by construction.** Auto-detected color depth and
+  width, cursor-addressed diffed repainting (`DiffGranularity`) for
+  low-flicker updates, and a real terminal-size query — the pieces a
+  TUI or terminal game needs, without pulling in a full TUI framework.
+- **Runs in the browser too.** The `wasm` feature exposes a
+  `wasm-bindgen` surface for image/GIF → ASCII conversion and
+  frame-at-a-time text animation, driven by your own
+  `requestAnimationFrame`/`setInterval` loop.
 
 ## Feature flags
 
-- **default** — synchronous image rendering only. `image::render_batch_parallel`
-  (Rayon-based parallel batch processing) works out of the box and does
-  **not** require the `video` feature.
-- **`video`** *(off by default)* — pulls in `tokio` and enables:
-  - the `video` module itself (requires `ffmpeg`/`ffprobe` on `PATH` at
-    runtime — there's no bundled/vendored ffmpeg),
-  - the async (`_async`) variants of the image API
-    (`render_image_file_async`, `render_batch_async`),
-  - `render::dispatch_async` and `render::play_terminal`.
-
-  These all share the same Tokio runtime dependency, which is why they're
-  gated together rather than each having their own flag.
-
-## Quick start
+| Feature    | Default | Pulls in                     | Enables                                                                 |
+|------------|:-------:|-------------------------------|--------------------------------------------------------------------------|
+| `parallel` | ✅ on   | `iascii/parallel`             | Row-level parallel conversion for one large image/frame (see below).    |
+| `video`    | off     | `tokio`                       | The `video` module, async image APIs, `render::play_terminal[_diffed]`, `render::dispatch_async`. Requires `ffmpeg`/`ffprobe` on `PATH` at runtime. |
+| `wasm`     | off     | `wasm-bindgen`                | The `wasm` module — browser-facing image/GIF/text-animation bindings. `target_arch = "wasm32"` only; not meant to be combined with `video`. |
 
 ```toml
-[dependencies]
-eger = "0.1"
+# Default (parallel image conversion, no video/wasm):
+eger = "1"
+
+# With video streaming/playback:
+eger = { version = "1", features = ["video"] }
+
+# For a WASM build:
+eger = { version = "1", default-features = false, features = ["wasm"] }
 ```
+
+## What you can build with it
+
+- **Terminal UIs and dashboards** — render a static image or a live-updating
+  ASCII visualization as part of a larger TUI; `render::diff_frame` and
+  `DiffGranularity` give you flicker-free partial repaints instead of
+  clear-and-redraw.
+- **Terminal ASCII games** — `banner` for title screens and score displays,
+  `text`'s animation styles for HUD elements and transitions, and
+  `render::terminal_size`/`auto_width` to adapt to whatever terminal the
+  player is running.
+- **Video and GIF playback in the terminal** — `video::play_video` and
+  `video::play_gif` stream frames directly to stdout, timed to the source
+  frame rate/delay, with bounded memory via `stream_video_frames` rather
+  than decoding the whole file up front.
+- **Batch ASCII art pipelines** — `render_batch_parallel`/`render_batch_async`
+  convert a whole directory of images in parallel and write results out
+  per-file.
+- **Browser ASCII art** — compile with `--features wasm --no-default-features`
+  and call the exported functions directly from JS.
+
+## Usage
+
+### Rendering a single image
 
 ```rust
 use eger::prelude::*;
+use std::path::Path;
 
-fn run() -> eger::Result<()> {
-    let config = Config::builder(MediaType::Image)
-        .from_file("cat.png")
-        .max_width(120)
-        .color_depth(ColorDepth::TrueColor)
-        .build()?;
+let config = Config::builder(MediaType::Image)
+    .from_file("photo.jpg")
+    .auto_width(100)               // fits the current terminal, falls back to 100
+    .color_depth(ColorDepth::TrueColor)
+    .build()?;
 
-    let ascii = eger::image_to_string(std::path::Path::new("cat.png"), &config)?;
-    println!("{ascii}");
-    Ok(())
+// To a String, to Vec<String>, or straight to stdout/a file:
+let s = eger::image_to_string(Path::new("photo.jpg"), &config)?;
+let lines = eger::image_to_lines(Path::new("photo.jpg"), &config)?;
+eger::image::image_to_file(Path::new("photo.jpg"), &config, Some(Path::new("out.txt")))?;
+```
+
+### Batch-converting a directory (Rayon, always on)
+
+```rust
+use eger::prelude::*;
+use eger::render::RenderTarget;
+
+let config = Config::builder(MediaType::Image)
+    .from_dir("frames/", r"\.png$")
+    .num_threads(8)
+    .build()?;
+
+let results = eger::render_batch_parallel(&config, |path| {
+    RenderTarget::File(path.with_extension("txt"))
+})?;
+
+for (path, outcome) in results {
+    if let Err(e) = outcome {
+        eprintln!("{path:?} failed: {e}");
+    }
 }
 ```
 
-With `features = ["video"]`:
+### Animated GIFs
 
 ```rust
+let frames = eger::gif_to_lines(std::path::Path::new("dance.gif"), &config)?;
+for (lines, delay) in frames {
+    // `lines.len()` rows per frame, `delay` is that frame's display time
+}
+```
+
+### Video (requires the `video` feature and `ffmpeg`/`ffprobe` on `PATH`)
+
+```rust
+use eger::prelude::*;
 use std::sync::Arc;
-use eger::prelude::*;
 
-async fn run() -> eger::Result<()> {
-    let config = Arc::new(
-        Config::builder(MediaType::Video)
-            .from_file("clip.mp4")
-            .max_width(100)
-            .num_threads(8)
-            .build()?,
-    );
-    eger::play_video(std::path::Path::new("clip.mp4"), config).await
-}
+let config = Arc::new(
+    Config::builder(MediaType::Video)
+        .from_file("clip.mp4")
+        .max_width(120)
+        .build()?,
+);
+
+eger::play_video(std::path::Path::new("clip.mp4"), config).await?;
 ```
 
-## Configuration
+For long or high-resolution video, prefer `stream_video_frames` (bounded
+channel, chunked Rayon conversion) over `render_video_frames`, which holds
+every frame in memory.
 
-`Config` is built once via `ConfigBuilder` and is cheap to share (wrap it in
-`Arc<Config>` for the video/async APIs, which already expect that). All
-setters are infallible and chainable; validation happens once, centrally, in
-[`ConfigBuilder::build`]:
-
-- the source path exists (`from_file`) or is a real directory (`from_dir`),
-- the batch regex pattern compiles,
-- the underlying `iascii::config::ConfigBuilder` itself validates cleanly.
-
-Calling `from_file` and `from_dir` more than once (in either order) is not
-an error — whichever was called last wins, since each just overwrites the
-builder's internal path/pattern/`is_dir` state.
-
-### Input sources
+### Text animation
 
 ```rust
-// Single file
-Config::builder(MediaType::Image).from_file("frame.png");
+use eger::prelude::*;
 
-// Every file in a directory whose name matches a regex
-Config::builder(MediaType::Image).from_dir("frames/", r"\.png$");
+let opts = TextAnimOptions {
+    frames: 60,
+    fps: 24.0,
+    base_color: Rgb::new(0, 200, 255),
+    ..Default::default()
+};
+
+eger::play_text("LOADING...", &TextAnimation::Rainbow, &opts)?;
 ```
 
-`InputSource::Directory` resolution (`Config::files`) is:
-- **non-recursive** — subdirectories are skipped even if their *name*
-  matches the pattern (only `Path::is_file()` entries are considered),
-- **case-sensitive** — pattern matching goes through `regex`, with no
-  implicit `(?i)` flag,
-- **sorted** — results are `Vec::sort`-ed for deterministic ordering
-  regardless of `read_dir`'s OS-dependent iteration order, which matters for
-  reproducible parallel batch runs,
-- an **error**, not an empty `Vec`, when nothing matches
-  (`ConfigError::NoMatchingFiles`).
+### Block-letter banners
 
-### Output
+```rust
+use eger::prelude::*;
 
-`ConfigBuilder::output` sets a *default* output path (`Config.output`).
-Every `*_to_file` convenience function (`image_to_file`, `video_to_file`)
-prefers an explicitly-passed path over this default, and only falls back to
-`config.output` when `None` is passed — so a single `Config` can be reused
-across calls that override the destination per-file and calls that rely on
-the configured default.
+// Plain, uncolored 7-row block text:
+for line in eger::banner_lines("HELLO") {
+    println!("{line}");
+}
 
-## Rendering pipelines
-
-### Images
-
-- `render_image_file` / `render_dynamic_image` — single image, sync.
-- `render_image_file_async` — same, off-loaded to Tokio's blocking pool
-  (`video` feature).
-- `render_batch_parallel` — every file from `Config::files()`, converted in
-  parallel on a dedicated Rayon pool sized by `config.num_threads`. A
-  per-file failure (e.g. a corrupt image) surfaces as an `Err` entry for
-  that file *without* aborting the rest of the batch — the `Vec` result
-  always has one entry per input file, each independently `Ok`/`Err`.
-- `render_batch_async` — one Tokio task per file so I/O overlaps, while the
-  CPU-bound decode+convert step for each still runs on the blocking pool
-  (`video` feature).
-- Convenience wrappers: `image_to_string`, `image_to_lines`, `image_to_file`.
-
-### Video (`video` feature)
-
-Frames are streamed as raw RGB24 straight out of an `ffmpeg` pipe (no
-temporary frame files) and converted in bounded chunks (`chunk_size =
-num_threads * 4`, minimum 1) on a single, reused Rayon pool — this caps
-memory to roughly one chunk of frames at a time while still overlapping the
-*next* chunk's pipe read with the *current* chunk's CPU-bound conversion.
-
-- `probe` — `ffprobe` for resolution/fps/frame count.
-- `render_video_frames` — the full frame pipeline, with an optional
-  `depth_override` to render the same video at a different `ColorDepth`
-  without rebuilding `Config`.
-- `video_to_lines` / `video_to_file` — convenience wrappers.
-  `video_to_file` joins frames with `"\n\x1E\n"` (ASCII record separator)
-  so they can be split back out losslessly.
-- `play_video` — renders and immediately plays back in-terminal at the
-  source's native fps, without touching disk.
-
-Every video entry point returns `egerError::FfmpegNotFound` if `ffmpeg`
-isn't on `PATH`, or `egerError::Ffmpeg(status, stderr)` if it runs but
-exits non-zero (e.g. probing a missing/corrupt file).
-
-## Color depth
-
-`render::detect_render_depth()` picks a `ColorDepth` appropriate for the
-current terminal, honoring:
-
-- [`NO_COLOR`](https://no-color.org) (any value) → plain text,
-- `TERM=dumb` → plain text,
-- stdout not actually being a terminal (e.g. piped to a file) → plain text,
-- otherwise, the richest depth the terminal advertises:
-  `COLORTERM=truecolor`/`24bit` → `TrueColor`; `TERM` containing
-  `256color` → `Ansi256`; otherwise `Ansi16`.
-
-This is purely an opt-in convenience — nothing in the crate calls it
-automatically. `Config::color_depth` (defaulting to `ColorDepth::TrueColor`)
-is what every rendering entry point actually uses unless a caller passes an
-explicit override (e.g. `render_video_frames`'s `depth_override`).
-
-## Testing
-
-```sh
-# Synchronous image pipeline only
-cargo test
-
-# Full pipeline, including the video/ffmpeg-backed tests
-cargo test --features video
+// Animated, colored banner frames:
+let opts = TextAnimOptions { frames: 30, ..Default::default() };
+let frames = eger::banner_frames("GAME OVER", &TextAnimation::Pulse, &opts)?;
 ```
 
-Video tests generate their own tiny synthetic clips at runtime via
-`ffmpeg -f lavfi -i testsrc=...` (no checked-in fixture files) and **skip
-themselves at runtime** (printing a message rather than failing) if
-`ffmpeg`/`ffprobe` aren't found on `PATH`. `image_pipeline.rs` and
-`video_pipeline.rs` are black-box integration tests that only exercise the
-crate's public API (`eger::prelude::*`), the way an external consumer
-would.
+### Low-flicker terminal repainting
 
-## Known sharp edges
+```rust
+use eger::render::{diff_frame, DiffGranularity};
 
-- **`ConfigError::MediaTypeNotFound` is currently unreachable.**
-  `Config::builder(media_type)` always takes a `MediaType` up front, so
-  nothing in `ConfigBuilder::build` can ever produce this variant today. If
-  you're relying on `matches!(err, ConfigError::MediaTypeNotFound)`
-  somewhere, it will never trigger — treat it as reserved for a future API
-  change (e.g. a `Default`-derived builder) rather than a case you need to
-  handle now.
-- **`num_threads` isn't validated.** `ConfigBuilder::num_threads` stores
-  whatever `usize` it's given, including `0`, without special-casing it.
-  Downstream, `rayon::ThreadPoolBuilder::num_threads(0)` falls back to
-  Rayon's own default parallelism rather than erroring, so `0` is *usable*
-  but is not the same as "use the default" being explicit — omitting the
-  call entirely (which defaults to `std::thread::available_parallelism()`)
-  is the clearer way to express that.
-- **`color_depth` is always applied, never optional, on the single-image
-  convenience API.** `render_dynamic_image` calls
-  `render::dispatch(target, &grid, Some(config.color_depth))` — there is no
-  code path through `image_to_string`/`image_to_lines`/`image_to_file` that
-  produces plain, escape-free output. To get plain text, either post-process
-  with a plain-grid render function directly, or drive `render::dispatch`
-  with `None` at a lower level.
+let patch = diff_frame(&previous_frame, &next_frame, DiffGranularity::Line);
+print!("{patch}"); // only the changed rows are redrawn
+```
 
-[`iascii`]: https://docs.rs/iascii
-[`ConfigBuilder::build`]: src/config.rs
+### WASM (requires the `wasm` feature)
+
+```rust
+// compiled with: wasm-pack build --no-default-features --features wasm
+use eger::wasm::*;
+
+let ascii = image_bytes_to_string(&png_bytes, 100, true)?;
+```
+
+```js
+import init, { image_bytes_to_string, text_frame_at, TextAnimationKind } from "./pkg/eger.js";
+await init();
+const art = image_bytes_to_string(bytes, 100, true);
+document.querySelector("pre").textContent = art;
+```
+
+## Parallelism
+
+`eger` deliberately separates *where* parallel work happens:
+
+- **Across files/frames** (`render_batch_parallel`,
+  `video::stream_video_frames`) — always on, plain `rayon::par_iter` over a
+  `Vec` this crate already owns. No feature flag needed.
+- **Within one conversion** (`image::convert`, used by every single-image
+  and per-frame conversion call site) — gated behind the `parallel` feature
+  (on by default), forwarded to `iascii`'s `convert_with_pool`, splitting
+  one image/frame's *rows* across the pool. `iascii`'s own
+  `parallel_threshold` decides per-call whether that's worth it, so a small
+  thumbnail transparently stays sequential.
+
+Both levels share a single Rayon `ThreadPool` per `Config` (built lazily on
+first use via `Config::thread_pool`, cached behind a `OnceLock`), so a batch
+job or a video stream doesn't spin up a new pool — and a fresh set of OS
+threads — per file or per frame. Nesting (a batch item large enough to also
+trigger the inner row-level split) is a supported, non-deadlocking Rayon
+pattern, and is covered by regression tests in `image.rs` and `video.rs`.
+
+`num_threads(0)` (or leaving it unset when the machine can't report
+`available_parallelism`) defers to Rayon's own default sizing.
+
+## Resource cleanup
+
+- The Rayon thread pool cached on `Config` is torn down normally when the
+  `Config` (and every `Arc` clone of it) is dropped — no manual shutdown
+  needed.
+- `video`'s `ffmpeg` child process is spawned with `kill_on_drop(true)` and
+  is killed explicitly the moment its output channel's receiver is dropped,
+  rather than being left to write into a pipe nobody is draining — which
+  would otherwise block `ffmpeg` indefinitely and hang the corresponding
+  `child.wait()`.
+
+## Benchmarks
+
+Criterion benchmarks live in `benches/` and cover image conversion at
+several sizes/color depths, banner/text frame generation, and (with
+`--features video`) the video frame-conversion hot path:
+
+```bash
+cargo bench                         # default features
+cargo bench --features video        # include video benches (needs ffmpeg)
+```
+
+See [`benches/README.md`](benches/README.md) for what each group measures.
+
+## MSRV
+
+Rust **1.80**, as declared in `Cargo.toml`'s `rust-version`.
+
+## License
+
+Dual-licensed under MIT or Apache-2.0, at your option.
