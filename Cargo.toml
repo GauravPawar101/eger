@@ -1,92 +1,89 @@
 [package]
 name = "eger"
-version = "1.0.0"
+version = "0.1.1"
 edition = "2021"
-rust-version = "1.80"
-description = "Parallel, async ASCII-art pipeline for images, GIFs and video, plus text/banner animation and a WASM binding — for TUIs, terminal games, terminal video players, and browser ASCII art"
+description = "A high-level, parallel ASCII-art media pipeline built on top of iascii: images, video, GIFs, dithering, animated text/banners, and procedural illusions, all rendered to ANSI."
 license = "MIT OR Apache-2.0"
-readme = "README.md"
+# --- Discoverability metadata (crates.io) ---
+# crates.io allows at most 5 keywords (<=20 chars each) and at most 5
+# categories, and requires them to match its fixed category taxonomy
+# (https://crates.io/category_slugs) or `cargo publish` will reject them.
+keywords = ["ascii-art", "ansi", "terminal", "dithering", "ffmpeg"]
+categories = ["multimedia::images", "multimedia::video", "command-line-utilities", "visualization"]
+# Fill these in with your actual repo/homepage before publishing — a
+# `repository` link in particular is what crates.io surfaces most
+# prominently on a crate's page and is what most people click first.
 repository = "https://github.com/Gauravpawar101/eger"
 homepage = "https://github.com/Gauravpawar101/eger"
 documentation = "https://docs.rs/eger"
-# crates.io caps this list at 5 entries, so these are picked to cover the
-# broadest set of things people actually search for when looking for this
-# kind of crate (terminal UIs, ASCII games, WASM ASCII art), rather than
-# restating "image"/"video" here — those are already covered by
-# `categories` below and by "ascii-art" itself, and are searched via the
-# full-text index of `description` regardless.
-keywords = ["ascii-art", "terminal", "tui", "game", "wasm"]
-categories = [
-    "multimedia::images",
-    "multimedia::video",
-    "command-line-utilities",
-    "rendering",
-    "wasm",
-]
+readme = "README.md"
+authors = ["Gaurav Pawar <gauravpawar2522@gmail.com"]
+
+[lib]
+name = "eger"
+path = "src/lib.rs"
 
 [dependencies]
-# iascii's own "parallel" feature (which pulls in rayon on iascii's side and
-# exposes `convert_with_pool`) is left OFF here and instead re-exposed as our
-# own `parallel` feature below (`parallel = ["iascii/parallel"]`), so turning
-# it on/off doesn't require touching this line — see the [features] table.
-iascii = "0.1.2"
-
-image = { version = "0.24", default-features = false, features = [
-    "png", "jpeg", "gif", "bmp",
-] }
-
-rayon = "1.10"
+iascii = { version = "0.1", features = ["parallel"] }
+# NOTE: dependency versions below are pinned tighter than they need to be
+# on a modern toolchain. They were pinned to get this crate building and
+# its full test+bench suite passing under this container's Rust 1.75
+# (rustc/cargo from `apt`, no rustup available). On a normal, current-ish
+# Rust install (1.81+) you can safely loosen `rayon`/`rayon-core` back to
+# unpinned `"1"`, bump `image` to `"0.25"` (add the `webp` feature back if
+# you want it), and drop the dev-dependency pins entirely.
+image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
+rayon = "=1.10.0"        # rayon-core 1.13+ needs rustc 1.80+
+rayon-core = "=1.12.1"
 regex = "1"
+thiserror = "1.0"
 terminal_size = "0.4"
-thiserror = "1"
-
-# Only pulled in by the `video` feature: video streaming/playback is the
-# only thing in this crate that needs an async runtime. Plain image
-# rendering (including the Rayon-parallel batch path) never touches tokio.
-#
-# Deliberately NOT "full": eger is a library that runs inside the caller's
-# own async context rather than spinning up its own runtime, so it never
-# needs "rt-multi-thread" or "macros" (those move to dev-dependencies below,
-# where they back this crate's own #[tokio::test]s) — every feature listed
-# here is used somewhere under src/.
-tokio = { version = "1", features = [
-    "rt", "process", "fs", "io-util", "io-std", "time", "sync",
-], optional = true }
-
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "io-std", "fs", "process", "sync", "time", "macros"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
-[dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "image_conversion"
-harness = false
-
-[[bench]]
-name = "batch_rendering"
-harness = false
-
-[[bench]]
-name = "animation"
-harness = false
-
-[[bench]]
-# Compiles and runs (printing a "skipped" message) even without the
-# `video` feature/ffmpeg on PATH — see benches/video_streaming.rs — so this
-# is intentionally not gated with `required-features`.
-name = "video_streaming"
-harness = false
-
 [features]
-default = ["parallel"]
+default = []
 video = ["dep:tokio"]
 wasm = ["dep:wasm-bindgen"]
-# Row-level parallel image conversion for a *single* image/frame, via
-# iascii's `convert_with_pool` (gated behind iascii's own "parallel"
-# feature, which this forwards to). Distinct from — and complementary to —
-# the always-on Rayon parallelism in `image::render_batch_parallel` and
-# `video::stream_video_frames`, which parallelize *across* files/frames
-# instead of *within* one. See image.rs's module docs for which paths use
-# which kind of parallelism and why.
-parallel = ["iascii/parallel"]
+
+[dev-dependencies]
+# See the NOTE above `image` — these pins are only needed for rustc 1.75.
+criterion = { version = "=0.5.1", features = ["html_reports"] }
+tempfile = "=3.14.0"
+clap = "=4.4.18"         # transitive, via criterion; clap 4.5+ needs newer rustc
+getrandom = "=0.2.15"    # transitive, via tempfile; 0.3+ needs newer rustc
+fastrand = "=2.1.1"      # transitive, via tempfile
+half = "=2.4.1"          # transitive, via criterion/ciborium; 2.5+ needs newer rustc
+
+[[bench]]
+name = "dither_bench"
+harness = false
+
+[[bench]]
+name = "palette_bench"
+harness = false
+
+[[bench]]
+name = "colorize_bench"
+harness = false
+
+[[bench]]
+name = "image_bench"
+harness = false
+
+[[bench]]
+name = "banner_text_bench"
+harness = false
+
+[[bench]]
+name = "segment_bench"
+harness = false
+
+[[bench]]
+name = "illusions_bench"
+harness = false
+
+[profile.bench]
+opt-level = 3
+lto = true
+codegen-units = 1

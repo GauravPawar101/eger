@@ -131,7 +131,7 @@ impl PixelAnimation {
 /// coordinates.
 ///
 /// [`PixelAnimation::Ripple`]: PixelAnimation::Ripple
-fn pixel_color(
+pub(crate) fn pixel_color(
     animation: &PixelAnimation,
     x: usize,
     y: usize,

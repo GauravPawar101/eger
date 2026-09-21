@@ -238,6 +238,30 @@ pub async fn play_terminal_diffed(
     Ok(())
 }
 
+/// Dispatches an already-rendered ANSI/plain string to `target` — the
+/// string-based counterpart of [`dispatch`] for render paths that produce
+/// their own text directly instead of going through a plain [`Grid`]
+/// render, such as [`crate::dither::render_ansi_dithered`] or
+/// [`crate::segment::render_segments`].
+pub fn dispatch_text(target: &RenderTarget, text: String) -> Result<RenderOutput> {
+    match target {
+        RenderTarget::Stdout => {
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(text.as_bytes())?;
+            stdout.write_all(b"\n")?;
+            Ok(RenderOutput::Displayed)
+        }
+        RenderTarget::File(path) => {
+            std::fs::write(path, &text)?;
+            Ok(RenderOutput::Written(path.clone()))
+        }
+        RenderTarget::String => Ok(RenderOutput::Text(text)),
+        RenderTarget::Lines => Ok(RenderOutput::Lines(
+            text.lines().map(str::to_owned).collect(),
+        )),
+    }
+}
+
 /// Dispatches a rendered `Grid` to `target`, synchronously.
 pub fn dispatch(
     target: &RenderTarget,

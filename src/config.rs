@@ -5,7 +5,9 @@
 //! [`ConfigBuilder::build`], mirroring how `iascii::config::ConfigBuilder`
 //! itself validates.
 
+use crate::dither::DitherOptions;
 use crate::error::ConfigError;
+use crate::script::Script;
 use iascii::config::{
     Config as AsciiConfig, ConfigBuilder as AsciiConfigBuilder, LuminanceMethod, OutputSizing,
 };
@@ -41,6 +43,10 @@ pub struct Config {
     pub num_threads: usize,
     pub color_depth: ColorDepth,
     pub ascii: AsciiConfig,
+    /// Dithering applied when rendering, in place of `iascii`'s own plain
+    /// per-cell nearest-palette color rounding — see [`crate::dither`].
+    /// `None` (the default) means the usual undithered rendering.
+    pub dither: Option<DitherOptions>,
     /// Lazily-built Rayon pool shared by every call site that uses this
     /// `Config` (single-image, batch, and video frame conversion), so the
     /// pool is constructed at most once per `Config` instead of once per
@@ -57,6 +63,7 @@ impl std::fmt::Debug for Config {
             .field("num_threads", &self.num_threads)
             .field("color_depth", &self.color_depth)
             .field("ascii", &self.ascii)
+            .field("dither", &self.dither)
             .field(
                 "thread_pool",
                 &self.thread_pool.get().map(|_| "<initialized>"),
@@ -148,6 +155,7 @@ pub struct ConfigBuilder {
     num_threads: Option<usize>,
     color_depth: ColorDepth,
     ascii: AsciiConfigBuilder,
+    dither: Option<DitherOptions>,
 }
 
 impl ConfigBuilder {
@@ -161,6 +169,7 @@ impl ConfigBuilder {
             num_threads: None,
             color_depth: ColorDepth::TrueColor,
             ascii: AsciiConfigBuilder::new(),
+            dither: None,
         }
     }
 
@@ -239,6 +248,26 @@ impl ConfigBuilder {
         self
     }
 
+    /// Selects the character ramp from a non-Latin [`Script`] instead of a
+    /// raw [`RampType`] — shorthand for `.ramp(script.ramp_type(dark)?)`
+    /// that silently falls back to the default ramp on the (practically
+    /// unreachable, see [`Script::ramp`]'s docs) validation error, since
+    /// every setter on this builder is otherwise infallible.
+    pub fn script(mut self, script: Script, dark: bool) -> Self {
+        if let Ok(ramp_type) = script.ramp_type(dark) {
+            self.ascii = self.ascii.ramp(ramp_type);
+        }
+        self
+    }
+
+    /// Enables dithering (see [`crate::dither`]) for this configuration's
+    /// renders. `None` (the default, if this is never called) renders
+    /// with `iascii`'s usual undithered nearest-palette rounding.
+    pub fn dither(mut self, options: DitherOptions) -> Self {
+        self.dither = Some(options);
+        self
+    }
+
     /// Selects the luminance formula used to derive grayscale from RGB.
     pub fn luminance_method(mut self, method: LuminanceMethod) -> Self {
         self.ascii = self.ascii.luminance_method(method);
@@ -286,6 +315,7 @@ impl ConfigBuilder {
             num_threads: self.num_threads.unwrap_or_else(default_parallelism),
             color_depth: self.color_depth,
             ascii,
+            dither: self.dither,
             thread_pool: OnceLock::new(),
         })
     }

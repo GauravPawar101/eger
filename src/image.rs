@@ -96,6 +96,11 @@ pub fn render_image_file(
 }
 
 /// Renders an already-decoded image to `target` using `config`.
+///
+/// When [`Config::dither`] is set, this routes through
+/// [`crate::dither::render_ansi_dithered`] instead of `iascii`'s own
+/// undithered per-cell rounding — see that module's docs for why that
+/// matters most at [`iascii::render::ColorDepth::Ansi16`]/`Ansi256`.
 pub fn render_dynamic_image(
     img: &::image::DynamicImage,
     config: &Config,
@@ -105,7 +110,13 @@ pub fn render_dynamic_image(
     let width = rgb.width();
     let height = rgb.height();
     let grid = convert(width, height, rgb.as_raw(), config)?;
-    render::dispatch(target, &grid, Some(config.color_depth))
+    match &config.dither {
+        Some(options) => {
+            let text = crate::dither::render_ansi_dithered(&grid, config.color_depth, *options);
+            render::dispatch_text(target, text)
+        }
+        None => render::dispatch(target, &grid, Some(config.color_depth)),
+    }
 }
 
 /// Async wrapper around [`render_image_file`].
@@ -124,7 +135,13 @@ pub async fn render_image_file_async(
         let height = rgb.height();
         let grid = convert(width, height, rgb.as_raw(), &config)?;
 
-        render::dispatch(&target, &grid, Some(config.color_depth))
+        match &config.dither {
+            Some(options) => {
+                let text = crate::dither::render_ansi_dithered(&grid, config.color_depth, *options);
+                render::dispatch_text(&target, text)
+            }
+            None => render::dispatch(&target, &grid, Some(config.color_depth)),
+        }
     })
     .await?
 }

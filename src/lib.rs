@@ -25,6 +25,23 @@
 //!   a converted image, a decoded GIF/video frame, banner text, or
 //!   anything else — including [`colorize::PixelAnimation::Custom`] for
 //!   fully custom, mathematically-defined coloring functions.
+//! - [`segment`] — partitions a single converted image/frame into
+//!   numbered/named **structures** ([`segment::SegmentMap`]), so a
+//!   particular region can be bolded, colored, or animated
+//!   ([`segment::SegmentStyle::Animation`]) on its own while the rest of
+//!   the frame renders normally. [`segment::SequenceStyles`] extends this
+//!   across a whole sequence of frames, keyed by `(frame, segment id)`.
+//! - [`dither`] — Floyd–Steinberg/Atkinson error diffusion and Bayer
+//!   ordered dithering, applied in character-grid space via
+//!   [`Config::dither`] — mainly useful for reducing banding at
+//!   [`iascii::render::ColorDepth::Ansi16`]/`Ansi256`.
+//! - [`script`] — ready-made non-Latin character ramps ([`script::Script`]:
+//!   Cyrillic, CJK, Devanagari, Braille, block/shade, ...) for
+//!   [`ConfigBuilder::script`], alongside `iascii`'s own Latin ramps.
+//! - [`illusions`] — procedurally generated optical-illusion source art
+//!   (café wall, Hermann grid, twisted cord, and the animated "rotating
+//!   rings" motion illusion), rendered through the same pipeline as any
+//!   other image.
 //! - [`wasm`] *(requires the `wasm` feature, `target_arch = "wasm32"` only)*
 //!   — a thin `wasm-bindgen` wrapper around the terminal-independent parts
 //!   of the pipeline, for rendering ASCII art in a browser.
@@ -66,9 +83,14 @@
 pub mod banner;
 pub mod colorize;
 pub mod config;
+pub mod dither;
 pub mod error;
+pub mod illusions;
 pub mod image;
+mod palette;
 pub mod render;
+pub mod script;
+pub mod segment;
 pub mod text;
 #[cfg(feature = "video")]
 pub mod video;
@@ -81,7 +103,9 @@ pub use crate::colorize::{
     colorize_sequence, ColorFn, PixelAnimation,
 };
 pub use crate::config::{Config, ConfigBuilder, MediaType};
+pub use crate::dither::{DitherMethod, DitherOptions};
 pub use crate::error::{EgerError, Result};
+pub use crate::illusions::{generate as generate_illusion, render_illusion, Illusion};
 pub use crate::image::{
     gif_to_lines, image_to_file, image_to_lines, image_to_string, render_batch_parallel,
     render_dynamic_image, render_image_file,
@@ -92,6 +116,10 @@ pub use crate::image::{render_batch_async, render_image_file_async};
 pub use crate::render::play_terminal_diffed;
 pub use crate::render::{
     detect_render_depth, terminal_size, DiffGranularity, RenderOutput, RenderTarget,
+};
+pub use crate::script::Script;
+pub use crate::segment::{
+    Rect, Segment, SegmentMap, SegmentOptions, SegmentStyle, SegmentStyles, SequenceStyles,
 };
 pub use crate::text::{
     play_text, text_frames, CustomAnimation, Rgb, TextAnimOptions, TextAnimation,
@@ -113,11 +141,17 @@ pub mod prelude {
         colorize_lines, colorize_sequence, ColorFn, PixelAnimation,
     };
     pub use crate::config::{Config, ConfigBuilder, InputSource, MediaType};
+    pub use crate::dither::{DitherMethod, DitherOptions};
     pub use crate::error::{ConfigError, EgerError, Result};
+    pub use crate::illusions::{generate as generate_illusion, render_illusion, Illusion};
     #[cfg(feature = "video")]
     pub use crate::render::play_terminal_diffed;
     pub use crate::render::{
         detect_render_depth, terminal_size, DiffGranularity, RenderOutput, RenderTarget,
+    };
+    pub use crate::script::Script;
+    pub use crate::segment::{
+        Rect, Segment, SegmentMap, SegmentOptions, SegmentStyle, SegmentStyles, SequenceStyles,
     };
     pub use crate::text::{
         play_text, text_frames, CustomAnimation, Rgb, TextAnimOptions, TextAnimation,
