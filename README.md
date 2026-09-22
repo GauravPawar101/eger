@@ -13,7 +13,7 @@ optical illusions, all sharing one rendering pipeline.
 
 ```toml
 [dependencies]
-eger = "0.1"
+eger = "1"
 ```
 
 ```rust
@@ -38,7 +38,8 @@ println!("{ascii}");
 | [`render`](src/render.rs) | Output targets (stdout / file / `String` / `Vec<String>`), terminal-size detection, cursor-addressed diffed playback |
 | [`text`](src/text.rs) | Text → ANSI coloring/animation: `Typewriter`, `Rainbow`, `Wave`, `Blink`, `Marquee`, `Pulse`, plus custom program/closure animations |
 | [`banner`](src/banner.rs) | Multi-line "big text" block-letter banners, same animation styles as `text` |
-| [`colorize`](src/colorize.rs) | Per-*cell* color animation for any block of plain ASCII text (converted image, GIF/video frame, banner, ...), including fully custom coloring functions |
+| [`colorize`](src/colorize.rs) | Per-*cell* color animation for any block of plain ASCII text (converted image, GIF/video frame, banner, ...), including a static two-color `Gradient`, a `Transformed` wrapper for layering a `ColorTransform` on any animation, and fully custom coloring functions |
+| [`color`](src/color.rs) | Reusable `ColorTransform`s — grayscale, invert, sepia, brightness/contrast/saturation, hue rotation, tinting, composition — shared by `dither`, `colorize`, and `wasm` |
 | [`segment`](src/segment.rs) | Partitions a converted frame into numbered/named structures so one region can be bolded, colored, or animated independently |
 | [`dither`](src/dither.rs) | Floyd–Steinberg / Atkinson error diffusion and Bayer ordered dithering, for reducing banding on coarse ANSI palettes |
 | [`script`](src/script.rs) | Ready-made non-Latin character ramps — Cyrillic, Greek, CJK, Devanagari, Hebrew, Arabic, Braille, block/shade |

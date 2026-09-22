@@ -24,9 +24,12 @@
 
 use iascii::error::ImageError;
 use iascii::ramp::{Ramp, RampType};
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::wasm_bindgen;
 
 /// A ready-made character ramp drawn from a non-Latin Unicode script or
 /// block, ordered light-to-heavy.
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Script {
     /// The default Latin/ASCII ramp — included so callers can treat

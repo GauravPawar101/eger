@@ -1,5 +1,141 @@
 # Tests & benchmarks added to `eger`
 
+> **Update:** this package now also includes new crate functionality —
+> color transforms, expanded dithering/colorize/wasm support — not just
+> tests and benchmarks for the original code. See "New crate features"
+> below for what changed and why, before the original tests/benchmarks
+> writeup.
+
+## New crate features
+
+- **`src/color.rs` (new module)** — a `ColorTransform` enum (`Grayscale`,
+  `Invert`, `Sepia`, `Brightness`, `Contrast`, `Saturate`, `HueRotate`,
+  `Tint`, `Compose`), each a pure `Rgb -> Rgb` function via
+  `ColorTransform::apply`, plus `apply_rgb8_buffer` for transforming a
+  flat `RGB8` source-image buffer before ASCII conversion. Internal
+  `rgb_to_hsl`/`hsl_to_rgb` helpers back `Saturate`/`HueRotate`. **20 unit
+  tests.**
+- **`src/text.rs`** — `Rgb` gained ~25 named color constants (`RED`,
+  `BLUE`, `ORANGE`, `PURPLE`, `SEPIA`, `TURQUOISE`, ...) and a
+  `mix(other, t)` lerp method used by the new `Gradient` animation and
+  `Tint` transform.
+- **`src/dither.rs`** — added `render_ansi_dithered_transformed(grid,
+  depth, options, transform)`, which runs a `ColorTransform` on each
+  cell's color *before* biasing/diffusing/quantizing, so e.g. a
+  `Grayscale` transform still gets the full benefit of dithering on a
+  coarse palette rather than transforming already-banded output. The
+  original `render_ansi_dithered` signature is untouched (it now just
+  calls the new function with no transform) — no breaking change, and
+  `DitherOptions` stays `Copy` (the transform is a separate parameter
+  rather than a new field, since `ColorTransform::Compose` holds a `Vec`
+  and isn't `Copy`). **6 new tests** on top of the existing dither tests.
+- **`src/colorize.rs`** — two new `PixelAnimation` variants:
+  `Gradient { from, to, horizontal }` (a static two-color sweep, the
+  simplest possible `Rgb::mix`-based effect, for the common
+  "tint between two brand colors" case without a `custom` closure) and
+  `Transformed { base, transform }` (wraps *any* other animation,
+  including another `Transformed`, and runs a `ColorTransform` on its
+  output — composes cleanly instead of needing a bespoke variant per
+  combination, e.g. "desaturated rainbow"). **8 new tests.**
+- **`src/script.rs` / `src/dither.rs`** — `Script` and `DitherMethod`
+  (both already plain fieldless enums) are now directly
+  `#[wasm_bindgen]`-annotated behind `cfg_attr(feature = "wasm", ...)`,
+  so they cross the JS boundary as themselves with no duplicate mirror
+  enum needed.
+- **`src/wasm.rs` — substantially extended.** The original
+  `image_bytes_to_string`/`image_bytes_to_lines`/`gif_bytes_to_frame_strings`/
+  `text_frame_at` are kept as-is for backward compatibility. New:
+  - **ANSI-16/256/TrueColor + dithering + color transforms:**
+    `ColorDepthKind` (`Plain`/`Ansi16`/`Ansi256`/`TrueColor`) and
+    `ColorTransformKind` (mirrors `ColorTransform`, one `f32` "amount"
+    param covers every kind that needs one) drive
+    `image_bytes_to_string_ex`/`image_bytes_to_lines_ex` — the
+    full-featured counterparts to the original bool-color functions.
+  - **Script/ramp:** `image_bytes_to_string_with_script(bytes, max_width,
+    script: Script, dark, depth, dither, dither_levels, transform,
+    transform_amount)`.
+  - **Colorize:** `AnimationKind` (`Rainbow`/`Wave`/`Pulse`/`Blink`/
+    `Plasma`/`Ripple`/`Gradient`) + `colorize_plain_text(...)` recolors
+    already-rendered plain text (from any `Plain`-depth function, or
+    `banner_lines_wasm` joined with `"\n"`) at a given frame, with an
+    optional layered `ColorTransformKind` on top.
+  - **Banner:** `banner_lines_wasm(text)` and `banner_frame_at(text,
+    animation, frame_index)`.
+  - **Illusions:** `IllusionKind` (`CafeWall`/`HermannGrid`/
+    `TwistedCord`) + `illusion_to_string(...)` (generate → convert →
+    render, no image bytes needed) and `rotating_rings_to_lines(...)`
+    (thin wrapper over `illusions::rotating_rings_frames`).
+
+  **19 new tests** (14 run and pass natively — see "Verifying the wasm
+  module" below; 5 are `Vec<JsValue>`-returning and only run under real
+  `wasm-bindgen-test`).
+- **`benches/color_transform_bench.rs` (new)** — per-color transform cost
+  for every kind plus a 4-step `Compose` chain, the `apply_rgb8_buffer`
+  whole-image path, transformed-vs-untransformed dithering, and
+  transformed-vs-plain colorize animation. Ran to completion, no errors.
+
+### Verifying the wasm module
+
+`src/wasm.rs` is gated `#[cfg(all(target_arch = "wasm32", feature =
+"wasm"))]`, and this sandbox has no `wasm32-unknown-unknown` target
+installed (no `rustup`), so it can't be compiled or tested in its normal
+configuration here. However, I found that `#[wasm_bindgen]` on the plain
+fieldless enums this module uses (`ColorDepthKind`, `ColorTransformKind`,
+`AnimationKind`, `IllusionKind`, `TextAnimationKind`, plus the
+now-`#[wasm_bindgen]`-annotated `Script`/`DitherMethod`) **does** expand
+and typecheck on the native target — so, purely for verification, I
+temporarily relaxed the module's `target_arch` restriction to
+`#[cfg(feature = "wasm")]`, compiled and ran its test suite natively, then
+restored the real `target_arch = "wasm32"` gate before finalizing this
+package (confirmed: `cargo test --features wasm` now shows the module
+absent again on native, as it should be — see below).
+
+What that native run showed:
+- **14 of 19 tests pass for real** — every function that returns a plain
+  `String`/`Result<String, JsError>` (all the `_ex`/`_with_script`/
+  `colorize_plain_text`/`illusion_to_string`/`text_frame_at` logic,
+  i.e. essentially all of the actual rendering/color logic this module
+  adds) executes correctly, not just typechecks.
+- **5 tests are marked `#[cfg_attr(not(target_arch = "wasm32"), ignore =
+  "...")]`** — these are the ones returning `Vec<JsValue>`
+  (`image_bytes_to_lines_ex`, `gif_bytes_to_frame_strings`,
+  `banner_lines_wasm`, `banner_frame_at`, `rotating_rings_to_lines`).
+  `wasm_bindgen::JsValue::from_str` compiles fine natively but genuinely
+  panics at runtime off `wasm32` ("function not implemented on
+  non-wasm32 targets") — confirmed by running them before adding the
+  `ignore` marker. This is expected: JS-value construction fundamentally
+  needs the real wasm runtime. They're left in the source, correctly
+  gated, ready to run for real under `wasm-bindgen-test` — but they are
+  genuinely **not independently verified** by anything I could run here,
+  beyond compiling. Everything each of them calls internally
+  (`strings_to_js`, and the same `banner_lines`/`banner_frames`/
+  `rotating_rings_frames` functions the crate's own non-wasm tests
+  already exercise) is separately tested elsewhere in this package,
+  which narrows the untested surface to `strings_to_js`'s one-line
+  `JsValue::from_str` mapping itself.
+- `cargo build --features "wasm,video"` also compiles cleanly (confirms
+  no naming/type conflicts between the two optional modules, e.g. the new
+  `ColorDepthKind` was deliberately named to avoid colliding with
+  `video::ColorMode`).
+
+If you want full coverage of the `Vec<JsValue>` functions, add a
+`wasm32-unknown-unknown` target (`rustup target add
+wasm32-unknown-unknown`) and run them with `wasm-pack test --headless
+--chrome` (or `--firefox`/`--node`) using `wasm-bindgen-test` — the
+existing `#[test]` functions would need converting to `#[wasm_bindgen_test]`
+for that runner, which I didn't do here since it can't be executed in
+this sandbox either way.
+
+### New `Cargo.toml` pin
+
+`wasm-bindgen` is now pinned to `=0.2.92` (down from an unpinned `"0.2"`)
+for the same reason as the other dev-dependency pins: `wasm-bindgen-shared`
+0.2.128+ needs rustc 1.77+, and this sandbox only has 1.75. Loosen this
+along with the other pins on a modern toolchain.
+
+---
+
+
 This package contains your original 15 source files (`src/`), unmodified,
 plus a new integration-test suite and a full Criterion benchmark suite.
 Everything here was actually **compiled and run**, not just written —
@@ -11,7 +147,10 @@ whole project builds for real.
 ```
 eger/
 ├── Cargo.toml                  # dependencies + bench registration (see notes below)
-├── src/                        # your original 15 files, unchanged
+├── src/                        # your original 15 files, plus new src/color.rs
+│                                #   and additions to dither.rs, colorize.rs,
+│                                #   text.rs, script.rs, wasm.rs — see
+│                                #   "New crate features" above
 ├── tests/
 │   └── integration_test.rs     # 15 cross-module tests (17 with --features video)
 ├── benches/
@@ -28,17 +167,22 @@ eger/
 │   ├── segment_bench.rs        # SegmentMap::detect by region count and grid
 │   │                           #   size, render_segments with mixed styles,
 │   │                           #   SegmentMap::manual construction
-│   └── illusions_bench.rs      # each Illusion's raw generation, the full
-│                                #   render_illusion pipeline, rotating rings
+│   ├── illusions_bench.rs      # each Illusion's raw generation, the full
+│   │                           #   render_illusion pipeline, rotating rings
+│   └── color_transform_bench.rs # every ColorTransform kind, transformed vs.
+│                                #   plain dithering/colorize (new)
 └── TESTS_AND_BENCHMARKS.md     # this file
 ```
 
-Every module you uploaded (`banner`, `colorize`, `config`, `dither`,
-`error`, `illusions`, `image`, `lib`, `palette`, `render`, `script`,
-`segment`, `text`, `video`, `wasm`) already had solid `#[cfg(test)]` unit
-tests of its own — those are untouched. What's new is the
-`tests/integration_test.rs` file (cross-module workflows a real caller
-would actually chain together) and the entire `benches/` directory.
+Every module you originally uploaded (`banner`, `colorize`, `config`,
+`dither`, `error`, `illusions`, `image`, `lib`, `palette`, `render`,
+`script`, `segment`, `text`, `video`, `wasm`) already had solid
+`#[cfg(test)]` unit tests of its own; those, and each module's body, are
+untouched except where "New crate features" above says otherwise. What's
+new is `src/color.rs`, the additions to `dither.rs`/`colorize.rs`/
+`text.rs`/`script.rs`/`wasm.rs`, `tests/integration_test.rs` (cross-module
+workflows a real caller would actually chain together), and the entire
+`benches/` directory.
 
 ## Verified results
 
@@ -47,12 +191,13 @@ version-pin note below):
 
 | Suite | Result |
 |---|---|
-| Existing unit tests, default features | **104 passed**, 0 failed |
-| Existing unit tests, `--features video` | **113 passed**, 0 failed (real `ffmpeg`/`ffprobe`, not mocked) |
-| New `tests/integration_test.rs`, default features | **15 passed**, 0 failed |
-| New `tests/integration_test.rs`, `--features video` | **17 passed**, 0 failed |
+| Unit tests (`src/`), default features | **137 passed**, 0 failed (104 original + 33 from the new color/dither-transform/colorize/gradient additions) |
+| Unit tests, `--features video` | **146 passed**, 0 failed (real `ffmpeg`/`ffprobe`, not mocked) |
+| Unit tests, `--features wasm` (native target) | **137 passed**, 0 failed — `src/wasm.rs` correctly excluded (needs real `wasm32`); see "Verifying the wasm module" above for the separate native-only check I ran against it |
+| `tests/integration_test.rs`, default features | **15 passed**, 0 failed |
+| `tests/integration_test.rs`, `--features video` | **17 passed**, 0 failed |
 | Doc-tests | **2 passed** |
-| All 7 bench files | compile clean, **every one run to completion** with real timing output, no panics |
+| All 8 bench files | compile clean, **every one run to completion** with real timing output, no panics |
 
 ## What the integration tests cover
 
@@ -147,11 +292,10 @@ versions requiring rustc 1.80/1.81. Every pin is commented in
 loosen or remove all of them** — they're not needed for correctness, only
 for building under this environment's old compiler.
 
-## `wasm` feature — not verified here
+## `wasm` feature
 
-`src/wasm.rs` is gated on `target_arch = "wasm32"`, and this sandbox has
-no `wasm32-unknown-unknown` target installed (no `rustup` to add it), so
-I could not compile or test it. Its existing structure (and public
-function signatures) weren't touched. If you want `wasm-bindgen-test`
-coverage for it, that's the one piece of this deliverable that's
-unverified.
+See "Verifying the wasm module" near the top of this document — `src/wasm.rs`
+was substantially extended, and while it can't be built for real `wasm32`
+in this sandbox, most of its logic (14/19 new tests) was verified for
+real via a temporary native-target relaxation. The remaining gap is
+documented there precisely.

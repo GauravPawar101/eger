@@ -72,9 +72,19 @@ fn bench_single_frame_per_animation(c: &mut Criterion) {
     let mut group = c.benchmark_group("colorize_single_frame_120x40");
     group.throughput(Throughput::Elements(cells));
     for (name, animation) in animations() {
-        group.bench_with_input(BenchmarkId::from_parameter(name), &animation, |b, animation| {
-            b.iter(|| black_box(colorize_lines(black_box(&lines), black_box(animation), black_box(3))));
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(name),
+            &animation,
+            |b, animation| {
+                b.iter(|| {
+                    black_box(colorize_lines(
+                        black_box(&lines),
+                        black_box(animation),
+                        black_box(3),
+                    ))
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -92,7 +102,13 @@ fn bench_frame_size_scaling(c: &mut Criterion) {
             BenchmarkId::from_parameter(format!("{w}x{h}")),
             &lines,
             |b, lines| {
-                b.iter(|| black_box(colorize_lines(black_box(lines), black_box(&animation), black_box(1))));
+                b.iter(|| {
+                    black_box(colorize_lines(
+                        black_box(lines),
+                        black_box(&animation),
+                        black_box(1),
+                    ))
+                });
             },
         );
     }
@@ -108,7 +124,13 @@ fn bench_colorize_frames_parallel(c: &mut Criterion) {
             BenchmarkId::from_parameter(frame_count),
             &frame_count,
             |b, &frame_count| {
-                b.iter(|| black_box(colorize_frames(black_box(&lines), black_box(&animation), black_box(frame_count))));
+                b.iter(|| {
+                    black_box(colorize_frames(
+                        black_box(&lines),
+                        black_box(&animation),
+                        black_box(frame_count),
+                    ))
+                });
             },
         );
     }

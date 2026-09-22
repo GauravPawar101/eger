@@ -11,13 +11,24 @@ fn temp_path(name: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut p = std::env::temp_dir();
-    p.push(format!("eger-illusions-bench-{}-{}-{}", std::process::id(), n, name));
+    p.push(format!(
+        "eger-illusions-bench-{}-{}-{}",
+        std::process::id(),
+        n,
+        name
+    ));
     p
 }
 
 fn bench_generate_by_illusion(c: &mut Criterion) {
     let illusions: Vec<(&str, Illusion)> = vec![
-        ("cafe_wall", Illusion::CafeWall { tile: 16, offset: 8 }),
+        (
+            "cafe_wall",
+            Illusion::CafeWall {
+                tile: 16,
+                offset: 8,
+            },
+        ),
         (
             "hermann_grid",
             Illusion::HermannGrid {
@@ -30,9 +41,19 @@ fn bench_generate_by_illusion(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("illusions_generate_640x360");
     for (name, illusion) in illusions {
-        group.bench_with_input(BenchmarkId::from_parameter(name), &illusion, |b, &illusion| {
-            b.iter(|| black_box(generate_illusion(black_box(illusion), black_box(640), black_box(360))));
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(name),
+            &illusion,
+            |b, &illusion| {
+                b.iter(|| {
+                    black_box(generate_illusion(
+                        black_box(illusion),
+                        black_box(640),
+                        black_box(360),
+                    ))
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -57,7 +78,10 @@ fn bench_render_illusion_full_pipeline(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 render_illusion(
-                    black_box(Illusion::CafeWall { tile: 12, offset: 6 }),
+                    black_box(Illusion::CafeWall {
+                        tile: 12,
+                        offset: 6,
+                    }),
                     black_box(480),
                     black_box(270),
                     black_box(&config),

@@ -57,7 +57,9 @@ fn bench_single_image_conversion_by_size(c: &mut Criterion) {
             BenchmarkId::from_parameter(format!("{w}x{h}")),
             &config,
             |b, config| {
-                b.iter(|| black_box(eger::image_to_string(black_box(&png), black_box(config)).unwrap()));
+                b.iter(|| {
+                    black_box(eger::image_to_string(black_box(&png), black_box(config)).unwrap())
+                });
             },
         );
     }

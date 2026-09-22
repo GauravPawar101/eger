@@ -122,7 +122,11 @@ fn dithered_render_dynamic_image_covers_every_method_and_depth() {
         DitherMethod::Bayer4,
         DitherMethod::Bayer8,
     ] {
-        for depth in [ColorDepth::Ansi16, ColorDepth::Ansi256, ColorDepth::TrueColor] {
+        for depth in [
+            ColorDepth::Ansi16,
+            ColorDepth::Ansi256,
+            ColorDepth::TrueColor,
+        ] {
             let config = Config::builder(MediaType::Image)
                 .from_file(&png)
                 .explicit_dimensions(20, 6)
@@ -210,8 +214,7 @@ fn every_illusion_renders_through_the_full_config_pipeline() {
             .build()
             .unwrap();
 
-        let output =
-            render_illusion(illusion, 48, 20, &config, &RenderTarget::String).unwrap();
+        let output = render_illusion(illusion, 48, 20, &config, &RenderTarget::String).unwrap();
         let text = match output {
             RenderOutput::Text(t) => t,
             other => panic!("expected Text, got {other:?}"),
@@ -229,11 +232,7 @@ fn rotating_rings_frames_can_be_recolored_again_with_a_pixel_animation() {
     // colored art) should still work and not panic, even though most
     // colorize_* call sites in this crate expect *plain* text — the
     // ANSI-colored cells parse as ordinary (albeit unusual) characters.
-    let frames = eger::generate_illusion(
-        eger::Illusion::CafeWall { tile: 4, offset: 2 },
-        16,
-        8,
-    );
+    let frames = eger::generate_illusion(eger::Illusion::CafeWall { tile: 4, offset: 2 }, 16, 8);
     assert_eq!((frames.width(), frames.height()), (16, 8));
 }
 
@@ -264,8 +263,8 @@ fn segment_detect_on_a_real_converted_photo_then_style_named_regions() {
 
     let ascii_img = ::image::open(&png).unwrap();
     let rgb = ascii_img.to_rgb8();
-    let grid = iascii::convert_image(rgb.width(), rgb.height(), rgb.as_raw(), &config.ascii)
-        .unwrap();
+    let grid =
+        iascii::convert_image(rgb.width(), rgb.height(), rgb.as_raw(), &config.ascii).unwrap();
 
     let mut map = SegmentMap::detect(&grid, SegmentOptions::default());
     assert_eq!(map.segments().len(), 2);
@@ -283,13 +282,7 @@ fn segment_detect_on_a_real_converted_photo_then_style_named_regions() {
             SegmentStyle::Animation(PixelAnimation::Rainbow { speed: 4.0 }),
         );
 
-    let out = eger::segment::render_segments(
-        &grid,
-        &map,
-        &styles,
-        Some(ColorDepth::TrueColor),
-        0,
-    );
+    let out = eger::segment::render_segments(&grid, &map, &styles, Some(ColorDepth::TrueColor), 0);
     assert!(out.contains("38;2;1;2;3"), "dark segment override color");
     assert_eq!(out.lines().count(), 10);
 
@@ -433,8 +426,8 @@ fn colorize_grid_matches_colorize_lines_over_the_grids_own_plain_text() {
         .unwrap();
     let img = ::image::open(&png).unwrap();
     let rgb = img.to_rgb8();
-    let grid = iascii::convert_image(rgb.width(), rgb.height(), rgb.as_raw(), &config.ascii)
-        .unwrap();
+    let grid =
+        iascii::convert_image(rgb.width(), rgb.height(), rgb.as_raw(), &config.ascii).unwrap();
 
     let animation = PixelAnimation::Rainbow { speed: 5.0 };
     let from_grid = colorize_grid(&grid, &animation, 2);
@@ -613,7 +606,9 @@ mod video_pipeline {
         let info = eger::probe(&path).await.unwrap();
         assert_eq!((info.width, info.height), (16, 16));
 
-        let frames = eger::video_to_lines(&path, Arc::clone(&config)).await.unwrap();
+        let frames = eger::video_to_lines(&path, Arc::clone(&config))
+            .await
+            .unwrap();
         assert_eq!(frames.len(), 5);
 
         let out = temp_path("video-pipeline-out.txt");

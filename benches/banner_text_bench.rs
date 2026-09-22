@@ -40,9 +40,18 @@ fn bench_banner_frames_by_animation(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("banner_frames_by_animation_medium_text");
     for (name, animation) in &animations {
-        group.bench_with_input(BenchmarkId::from_parameter(*name), animation, |b, animation| {
-            b.iter(|| black_box(banner_frames(black_box(MEDIUM), black_box(animation), black_box(&opts)).unwrap()));
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(*name),
+            animation,
+            |b, animation| {
+                b.iter(|| {
+                    black_box(
+                        banner_frames(black_box(MEDIUM), black_box(animation), black_box(&opts))
+                            .unwrap(),
+                    )
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -73,9 +82,18 @@ fn bench_text_frames_by_animation(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("text_frames_by_animation");
     for (name, animation) in &animations {
-        group.bench_with_input(BenchmarkId::from_parameter(*name), animation, |b, animation| {
-            b.iter(|| black_box(text_frames(black_box(LONG), black_box(animation), black_box(&opts)).unwrap()));
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(*name),
+            animation,
+            |b, animation| {
+                b.iter(|| {
+                    black_box(
+                        text_frames(black_box(LONG), black_box(animation), black_box(&opts))
+                            .unwrap(),
+                    )
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -89,7 +107,14 @@ fn bench_banner_frames_scaling_with_frame_count(c: &mut Criterion) {
         };
         group.bench_with_input(BenchmarkId::from_parameter(frames), &opts, |b, opts| {
             b.iter(|| {
-                black_box(banner_frames(black_box(MEDIUM), black_box(&TextAnimation::Rainbow), black_box(opts)).unwrap())
+                black_box(
+                    banner_frames(
+                        black_box(MEDIUM),
+                        black_box(&TextAnimation::Rainbow),
+                        black_box(opts),
+                    )
+                    .unwrap(),
+                )
             });
         });
     }

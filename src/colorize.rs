@@ -98,6 +98,29 @@ pub enum PixelAnimation {
     /// provided as a second worked example alongside [`Plasma`]. `speed`
     /// controls how fast the rings travel outward.
     Ripple { base_color: Rgb, speed: f32 },
+    /// A static (time-independent) linear gradient between `from` and
+    /// `to`, sweeping left-to-right if `horizontal` is `true` or
+    /// top-to-bottom otherwise. Unlike the other built-ins this ignores
+    /// `frame` entirely — it's the simplest possible
+    /// [`Rgb::mix`]-based effect, provided as a ready-made built-in for
+    /// the common "just tint this art between two brand colors" case
+    /// instead of requiring a [`PixelAnimation::custom`] closure for it.
+    Gradient {
+        from: Rgb,
+        to: Rgb,
+        horizontal: bool,
+    },
+    /// Wraps `base` and applies `transform` (see
+    /// [`crate::color::ColorTransform`]) to whatever color `base` would
+    /// have produced for that cell — so, for example,
+    /// `Transformed { base: Box::new(Rainbow { speed: 6.0 }), transform: ColorTransform::Saturate(0.4) }`
+    /// is a desaturated rainbow sweep, without needing a bespoke
+    /// "desaturated rainbow" variant. Composes with any other
+    /// `PixelAnimation`, including another `Transformed`.
+    Transformed {
+        base: Box<PixelAnimation>,
+        transform: crate::color::ColorTransform,
+    },
     /// A user-supplied [`ColorFn`] — see [`PixelAnimation::custom`].
     Custom(ColorFn),
 }
@@ -188,6 +211,28 @@ pub(crate) fn pixel_color(
             let phase = dist * 0.5 - frame as f32 * speed;
             let brightness = (0.5 + 0.5 * phase.sin()).clamp(0.15, 1.0);
             base_color.scale(brightness)
+        }
+        PixelAnimation::Gradient {
+            from,
+            to,
+            horizontal,
+        } => {
+            let t = if *horizontal {
+                if width <= 1 {
+                    0.0
+                } else {
+                    x as f32 / (width - 1) as f32
+                }
+            } else if height <= 1 {
+                0.0
+            } else {
+                y as f32 / (height - 1) as f32
+            };
+            from.mix(*to, t)
+        }
+        PixelAnimation::Transformed { base, transform } => {
+            let color = pixel_color(base, x, y, frame, ch, width, height);
+            transform.apply(color)
         }
         PixelAnimation::Custom(f) => f(x, y, frame, ch),
     }
@@ -555,6 +600,138 @@ mod tests {
         ] {
             let out = colorize_lines(&lines, &animation, 3);
             assert!(out.contains("\x1b[38;2;"));
+        }
+    }
+
+    #[test]
+    fn gradient_horizontal_starts_at_from_and_ends_at_to() {
+        let animation = PixelAnimation::Gradient {
+            from: Rgb::RED,
+            to: Rgb::BLUE,
+            horizontal: true,
+        };
+        let out = pixel_color(&animation, 0, 0, 0, '#', 4, 1);
+        assert_eq!(out, Rgb::RED);
+        let out = pixel_color(&animation, 3, 0, 0, '#', 4, 1);
+        assert_eq!(out, Rgb::BLUE);
+    }
+
+    #[test]
+    fn gradient_vertical_starts_at_from_and_ends_at_to() {
+        let animation = PixelAnimation::Gradient {
+            from: Rgb::GREEN,
+            to: Rgb::YELLOW,
+            horizontal: false,
+        };
+        let out = pixel_color(&animation, 0, 0, 0, '#', 1, 3);
+        assert_eq!(out, Rgb::GREEN);
+        let out = pixel_color(&animation, 0, 2, 0, '#', 1, 3);
+        assert_eq!(out, Rgb::YELLOW);
+    }
+
+    #[test]
+    fn gradient_is_time_independent() {
+        let animation = PixelAnimation::Gradient {
+            from: Rgb::RED,
+            to: Rgb::BLUE,
+            horizontal: true,
+        };
+        let at_frame_0 = pixel_color(&animation, 2, 0, 0, '#', 5, 1);
+        let at_frame_99 = pixel_color(&animation, 2, 0, 99, '#', 5, 1);
+        assert_eq!(at_frame_0, at_frame_99);
+    }
+
+    #[test]
+    fn gradient_single_column_does_not_divide_by_zero() {
+        let animation = PixelAnimation::Gradient {
+            from: Rgb::RED,
+            to: Rgb::BLUE,
+            horizontal: true,
+        };
+        // width == 1 would divide by (width - 1) == 0 without the guard.
+        let out = pixel_color(&animation, 0, 0, 0, '#', 1, 1);
+        assert_eq!(out, Rgb::RED);
+    }
+
+    #[test]
+    fn transformed_grayscale_wraps_rainbow_and_desaturates_it() {
+        let rainbow = PixelAnimation::Rainbow { speed: 5.0 };
+        let wrapped = PixelAnimation::Transformed {
+            base: Box::new(rainbow.clone()),
+            transform: crate::color::ColorTransform::Grayscale,
+        };
+        let plain = pixel_color(&rainbow, 3, 0, 7, '#', 10, 10);
+        let gray = pixel_color(&wrapped, 3, 0, 7, '#', 10, 10);
+        // The un-transformed Rainbow output at these coordinates should not
+        // already happen to be gray, so the wrapped version must differ.
+        assert_ne!(plain, gray);
+        assert_eq!(gray.g(), gray.b());
+    }
+
+    #[test]
+    fn transformed_none_matches_the_base_animation_exactly() {
+        let base = PixelAnimation::Ripple {
+            base_color: Rgb::WHITE,
+            speed: 0.4,
+        };
+        let wrapped = PixelAnimation::Transformed {
+            base: Box::new(base.clone()),
+            transform: crate::color::ColorTransform::None,
+        };
+        for frame in [0u64, 1, 5] {
+            assert_eq!(
+                pixel_color(&base, 2, 3, frame, '#', 8, 8),
+                pixel_color(&wrapped, 2, 3, frame, '#', 8, 8)
+            );
+        }
+    }
+
+    #[test]
+    fn transformed_can_wrap_another_transformed() {
+        let doubly_wrapped = PixelAnimation::Transformed {
+            base: Box::new(PixelAnimation::Transformed {
+                base: Box::new(PixelAnimation::Gradient {
+                    from: Rgb::BLACK,
+                    to: Rgb::WHITE,
+                    horizontal: true,
+                }),
+                transform: crate::color::ColorTransform::Invert,
+            }),
+            transform: crate::color::ColorTransform::Invert,
+        };
+        // Two inverts cancel: the doubly-wrapped gradient should match the
+        // plain gradient exactly.
+        let plain = PixelAnimation::Gradient {
+            from: Rgb::BLACK,
+            to: Rgb::WHITE,
+            horizontal: true,
+        };
+        assert_eq!(
+            pixel_color(&doubly_wrapped, 4, 0, 0, '#', 10, 1),
+            pixel_color(&plain, 4, 0, 0, '#', 10, 1)
+        );
+    }
+
+    #[test]
+    fn colorize_lines_renders_gradient_and_transformed_end_to_end() {
+        let lines = block(&["#####", "#####"]);
+        for animation in [
+            PixelAnimation::Gradient {
+                from: Rgb::RED,
+                to: Rgb::BLUE,
+                horizontal: true,
+            },
+            PixelAnimation::Transformed {
+                base: Box::new(PixelAnimation::Plasma {
+                    scale: 0.3,
+                    speed: 0.2,
+                }),
+                transform: crate::color::ColorTransform::Sepia,
+            },
+        ] {
+            let out = colorize_lines(&lines, &animation, 1);
+            assert!(out.contains("\x1b[38;2;"));
+            assert_eq!(out.lines().count(), 2);
         }
     }
 }

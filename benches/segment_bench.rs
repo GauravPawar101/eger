@@ -42,7 +42,12 @@ fn bench_detect_by_region_count(c: &mut Criterion) {
             BenchmarkId::from_parameter(blocks_per_side * blocks_per_side),
             &grid,
             |b, grid| {
-                b.iter(|| black_box(SegmentMap::detect(black_box(grid), SegmentOptions::default())));
+                b.iter(|| {
+                    black_box(SegmentMap::detect(
+                        black_box(grid),
+                        SegmentOptions::default(),
+                    ))
+                });
             },
         );
     }
@@ -54,7 +59,12 @@ fn bench_detect_by_grid_size(c: &mut Criterion) {
     for size in [30u32, 60, 120] {
         let grid = tiled_grid(size, 4);
         group.bench_with_input(BenchmarkId::from_parameter(size), &grid, |b, grid| {
-            b.iter(|| black_box(SegmentMap::detect(black_box(grid), SegmentOptions::default())));
+            b.iter(|| {
+                black_box(SegmentMap::detect(
+                    black_box(grid),
+                    SegmentOptions::default(),
+                ))
+            });
         });
     }
     group.finish();
@@ -101,7 +111,13 @@ fn bench_manual_segment_construction(c: &mut Criterion) {
             .collect();
         let dim = side * 5;
         group.bench_with_input(BenchmarkId::from_parameter(n), &regions, |b, regions| {
-            b.iter(|| black_box(SegmentMap::manual(black_box(dim), black_box(dim), black_box(regions.clone()))));
+            b.iter(|| {
+                black_box(SegmentMap::manual(
+                    black_box(dim),
+                    black_box(dim),
+                    black_box(regions.clone()),
+                ))
+            });
         });
     }
     group.finish();

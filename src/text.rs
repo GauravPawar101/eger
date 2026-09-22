@@ -35,10 +35,49 @@ pub const FRAME_SEPARATOR: &str = "\n\x1E\n";
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
+    pub const BLACK: Rgb = Rgb(0, 0, 0);
     pub const WHITE: Rgb = Rgb(255, 255, 255);
+    pub const RED: Rgb = Rgb(255, 0, 0);
+    pub const GREEN: Rgb = Rgb(0, 255, 0);
+    pub const BLUE: Rgb = Rgb(0, 0, 255);
+    pub const YELLOW: Rgb = Rgb(255, 255, 0);
+    pub const CYAN: Rgb = Rgb(0, 255, 255);
+    pub const MAGENTA: Rgb = Rgb(255, 0, 255);
+    pub const ORANGE: Rgb = Rgb(255, 165, 0);
+    pub const PURPLE: Rgb = Rgb(128, 0, 128);
+    pub const PINK: Rgb = Rgb(255, 105, 180);
+    pub const GRAY: Rgb = Rgb(128, 128, 128);
+    pub const SILVER: Rgb = Rgb(192, 192, 192);
+    pub const GOLD: Rgb = Rgb(255, 215, 0);
+    pub const NAVY: Rgb = Rgb(0, 0, 128);
+    pub const TEAL: Rgb = Rgb(0, 128, 128);
+    pub const MAROON: Rgb = Rgb(128, 0, 0);
+    pub const OLIVE: Rgb = Rgb(128, 128, 0);
+    pub const LIME: Rgb = Rgb(50, 205, 50);
+    pub const INDIGO: Rgb = Rgb(75, 0, 130);
+    pub const VIOLET: Rgb = Rgb(238, 130, 238);
+    pub const BROWN: Rgb = Rgb(139, 69, 19);
+    pub const CORAL: Rgb = Rgb(255, 127, 80);
+    pub const SALMON: Rgb = Rgb(250, 128, 114);
+    pub const TURQUOISE: Rgb = Rgb(64, 224, 208);
+    pub const CRIMSON: Rgb = Rgb(220, 20, 60);
+    pub const SEPIA: Rgb = Rgb(112, 66, 20);
 
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self(r, g, b)
+    }
+
+    #[inline]
+    pub const fn r(self) -> u8 {
+        self.0
+    }
+    #[inline]
+    pub const fn g(self) -> u8 {
+        self.1
+    }
+    #[inline]
+    pub const fn b(self) -> u8 {
+        self.2
     }
 
     pub(crate) fn ansi_fg(self) -> String {
@@ -51,6 +90,20 @@ impl Rgb {
             (f32::from(self.0) * brightness).round() as u8,
             (f32::from(self.1) * brightness).round() as u8,
             (f32::from(self.2) * brightness).round() as u8,
+        )
+    }
+
+    /// Linearly interpolates between `self` (`t = 0.0`) and `other`
+    /// (`t = 1.0`), clamping `t` to `[0.0, 1.0]` first. Used by
+    /// [`crate::colorize::PixelAnimation::Gradient`] and available as a
+    /// general-purpose building block for custom animations/transforms.
+    pub fn mix(self, other: Rgb, t: f32) -> Rgb {
+        let t = t.clamp(0.0, 1.0);
+        let lerp = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
+        Rgb(
+            lerp(self.0, other.0),
+            lerp(self.1, other.1),
+            lerp(self.2, other.2),
         )
     }
 }

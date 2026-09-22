@@ -40,7 +40,11 @@ fn bench_dither_methods(c: &mut Criterion) {
         DitherMethod::Bayer4,
         DitherMethod::Bayer8,
     ];
-    let depths = [ColorDepth::Ansi16, ColorDepth::Ansi256, ColorDepth::TrueColor];
+    let depths = [
+        ColorDepth::Ansi16,
+        ColorDepth::Ansi256,
+        ColorDepth::TrueColor,
+    ];
 
     for (w, h) in SIZES {
         let grid = gradient_grid(w, h);
@@ -69,7 +73,12 @@ fn bench_dither_methods(c: &mut Criterion) {
         }
 
         group.bench_function("baseline_iascii_render_ansi", |b| {
-            b.iter(|| black_box(render_ansi(black_box(&grid), black_box(ColorDepth::TrueColor))));
+            b.iter(|| {
+                black_box(render_ansi(
+                    black_box(&grid),
+                    black_box(ColorDepth::TrueColor),
+                ))
+            });
         });
 
         group.finish();
@@ -80,19 +89,27 @@ fn bench_truecolor_posterize_levels(c: &mut Criterion) {
     let grid = gradient_grid(160, 48);
     let mut group = c.benchmark_group("dither_truecolor_posterize_levels");
     for levels in [2u8, 4, 8, 16, 32] {
-        group.bench_with_input(BenchmarkId::from_parameter(levels), &levels, |b, &levels| {
-            let options = DitherOptions::new(DitherMethod::FloydSteinberg).levels(levels);
-            b.iter(|| {
-                black_box(eger::dither::render_ansi_dithered(
-                    black_box(&grid),
-                    black_box(ColorDepth::TrueColor),
-                    black_box(options),
-                ))
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(levels),
+            &levels,
+            |b, &levels| {
+                let options = DitherOptions::new(DitherMethod::FloydSteinberg).levels(levels);
+                b.iter(|| {
+                    black_box(eger::dither::render_ansi_dithered(
+                        black_box(&grid),
+                        black_box(ColorDepth::TrueColor),
+                        black_box(options),
+                    ))
+                });
+            },
+        );
     }
     group.finish();
 }
 
-criterion_group!(benches, bench_dither_methods, bench_truecolor_posterize_levels);
+criterion_group!(
+    benches,
+    bench_dither_methods,
+    bench_truecolor_posterize_levels
+);
 criterion_main!(benches);

@@ -43,9 +43,12 @@
 use crate::palette::{self, Quantized};
 use iascii::grid::Grid;
 use iascii::render::ColorDepth;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::wasm_bindgen;
 
 /// Which dithering algorithm (if any) to apply. See the module docs for
 /// the tradeoffs between the error-diffusion and ordered families.
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DitherMethod {
     /// No dithering: plain nearest-palette rounding per cell, same as
@@ -184,6 +187,34 @@ fn diffuse(
 /// / [`DitherMethod::Bayer4`] / [`DitherMethod::Bayer8`] being the steadier choice across an animated
 /// sequence.
 pub fn render_ansi_dithered(grid: &Grid, depth: ColorDepth, options: DitherOptions) -> String {
+    render_ansi_dithered_impl(grid, depth, options, None)
+}
+
+/// Like [`render_ansi_dithered`], but additionally runs every cell's color
+/// through `transform` (see [`crate::color::ColorTransform`]) *before*
+/// biasing/diffusing and quantizing it — so, for example, a
+/// [`crate::color::ColorTransform::Grayscale`] applied here still lets
+/// dithering do its usual job of smoothing the resulting greys across a
+/// coarse [`ColorDepth::Ansi16`] palette, rather than transforming
+/// already-quantized output (which would just be a strictly worse, more
+/// banded version of transforming first). A separate function rather than
+/// a `DitherOptions` field so `DitherOptions` can stay `Copy` (a
+/// [`crate::color::ColorTransform::Compose`] holds a `Vec`, which isn't).
+pub fn render_ansi_dithered_transformed(
+    grid: &Grid,
+    depth: ColorDepth,
+    options: DitherOptions,
+    transform: &crate::color::ColorTransform,
+) -> String {
+    render_ansi_dithered_impl(grid, depth, options, Some(transform))
+}
+
+fn render_ansi_dithered_impl(
+    grid: &Grid,
+    depth: ColorDepth,
+    options: DitherOptions,
+    transform: Option<&crate::color::ColorTransform>,
+) -> String {
     let w = grid.width() as usize;
     let h = grid.height() as usize;
     if w == 0 || h == 0 {
@@ -209,10 +240,18 @@ pub fn render_ansi_dithered(grid: &Grid, depth: ColorDepth, options: DitherOptio
                 continue;
             };
 
+            let source_color = match transform {
+                Some(t) => t.apply(crate::text::Rgb::new(
+                    cell.color.r,
+                    cell.color.g,
+                    cell.color.b,
+                )),
+                None => crate::text::Rgb::new(cell.color.r, cell.color.g, cell.color.b),
+            };
             let base = (
-                cell.color.r as f32,
-                cell.color.g as f32,
-                cell.color.b as f32,
+                f32::from(source_color.r()),
+                f32::from(source_color.g()),
+                f32::from(source_color.b()),
             );
             let biased = match options.method {
                 DitherMethod::None => base,
@@ -291,6 +330,24 @@ mod tests {
         convert_image(w, h, &buf, &cfg).unwrap()
     }
 
+    /// A flat, fully saturated red block — non-gray, so
+    /// grayscale/invert/hue-rotate transforms are all visibly different
+    /// from a no-op on it.
+    fn solid_red_grid(w: u32, h: u32) -> Grid {
+        let cfg = AsciiConfigBuilder::new()
+            .output_sizing(OutputSizing::Explicit {
+                width: w as usize,
+                height: h as usize,
+            })
+            .build()
+            .unwrap();
+        let mut buf = Vec::with_capacity((w * h * 3) as usize);
+        for _ in 0..(w * h) {
+            buf.extend_from_slice(&[220, 20, 20]);
+        }
+        convert_image(w, h, &buf, &cfg).unwrap()
+    }
+
     #[test]
     fn none_method_matches_plain_nearest_palette_rendering() {
         let grid = gradient_grid(6, 6);
@@ -362,5 +419,103 @@ mod tests {
             DitherOptions::new(DitherMethod::FloydSteinberg),
         );
         assert_ne!(plain, dithered);
+    }
+
+    #[test]
+    fn transformed_with_none_transform_matches_untransformed() {
+        let grid = solid_red_grid(4, 4);
+        let options = DitherOptions::new(DitherMethod::FloydSteinberg);
+        let plain = render_ansi_dithered(&grid, ColorDepth::TrueColor, options);
+        let transformed = render_ansi_dithered_transformed(
+            &grid,
+            ColorDepth::TrueColor,
+            options,
+            &crate::color::ColorTransform::None,
+        );
+        assert_eq!(plain, transformed);
+    }
+
+    #[test]
+    fn transformed_grayscale_on_a_solid_red_grid_contains_no_pure_red_escape() {
+        let grid = solid_red_grid(4, 4);
+        let out = render_ansi_dithered_transformed(
+            &grid,
+            ColorDepth::TrueColor,
+            DitherOptions::default(),
+            &crate::color::ColorTransform::Grayscale,
+        );
+        // The source pixels are (220, 20, 20); a proper grayscale should
+        // never reproduce that exact triplet (r != g == b for a red input).
+        assert!(!out.contains("38;2;220;20;20"));
+    }
+
+    #[test]
+    fn transformed_invert_on_black_produces_white() {
+        let cfg = iascii::config::ConfigBuilder::new()
+            .output_sizing(iascii::config::OutputSizing::Explicit {
+                width: 2,
+                height: 2,
+            })
+            .build()
+            .unwrap();
+        let buf = vec![0u8; 2 * 2 * 3];
+        let grid = iascii::convert::convert_image(2, 2, &buf, &cfg).unwrap();
+
+        let out = render_ansi_dithered_transformed(
+            &grid,
+            ColorDepth::TrueColor,
+            DitherOptions::default(),
+            &crate::color::ColorTransform::Invert,
+        );
+        assert!(out.contains("38;2;255;255;255"));
+    }
+
+    #[test]
+    fn transformed_still_dithers_after_transforming() {
+        // The transform runs before dithering, so a transform that still
+        // leaves a non-trivial gradient (grayscale of a color gradient is
+        // still a gradient) should still show plain-vs-dithered divergence
+        // on a coarse palette, the same way the untransformed case does.
+        let grid = gradient_grid(1, 40);
+        let plain = render_ansi_dithered_transformed(
+            &grid,
+            ColorDepth::Ansi16,
+            DitherOptions::default(),
+            &crate::color::ColorTransform::Grayscale,
+        );
+        let dithered = render_ansi_dithered_transformed(
+            &grid,
+            ColorDepth::Ansi16,
+            DitherOptions::new(DitherMethod::FloydSteinberg),
+            &crate::color::ColorTransform::Grayscale,
+        );
+        assert_ne!(plain, dithered);
+    }
+
+    #[test]
+    fn transformed_composes_multiple_steps() {
+        let grid = solid_red_grid(2, 2);
+        let composed = crate::color::ColorTransform::Compose(vec![
+            crate::color::ColorTransform::Invert,
+            crate::color::ColorTransform::Grayscale,
+        ]);
+        let out = render_ansi_dithered_transformed(
+            &grid,
+            ColorDepth::TrueColor,
+            DitherOptions::default(),
+            &composed,
+        );
+        // Invert(220,20,20) = (35,235,235), then grayscale of that is a
+        // single equal-channel value — just check it parses as a 24-bit
+        // color with all three channels equal.
+        let start = out.find("38;2;").unwrap() + "38;2;".len();
+        let end = out[start..].find('m').unwrap() + start;
+        let parts: Vec<u8> = out[start..end]
+            .split(';')
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], parts[1]);
+        assert_eq!(parts[1], parts[2]);
     }
 }

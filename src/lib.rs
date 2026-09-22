@@ -25,6 +25,12 @@
 //!   a converted image, a decoded GIF/video frame, banner text, or
 //!   anything else — including [`colorize::PixelAnimation::Custom`] for
 //!   fully custom, mathematically-defined coloring functions.
+//! - [`color`] — reusable [`color::ColorTransform`]s (grayscale, invert,
+//!   sepia, brightness/contrast/saturation, hue rotation, tinting) shared
+//!   by [`dither`] (transform-then-quantize), [`colorize`]
+//!   ([`colorize::PixelAnimation::Transformed`] layers one on top of any
+//!   other animation), and [`wasm`] (exposed directly for
+//!   post-processing already-rendered art in the browser).
 //! - [`segment`] — partitions a single converted image/frame into
 //!   numbered/named **structures** ([`segment::SegmentMap`]), so a
 //!   particular region can be bolded, colored, or animated
@@ -81,6 +87,7 @@
 //! ```
 
 pub mod banner;
+pub mod color;
 pub mod colorize;
 pub mod config;
 pub mod dither;
@@ -98,6 +105,7 @@ pub mod video;
 pub mod wasm;
 
 pub use crate::banner::{banner_frames, banner_lines};
+pub use crate::color::ColorTransform;
 pub use crate::colorize::{
     colorize_frames, colorize_grid, colorize_grid_frames, colorize_joined_sequence, colorize_lines,
     colorize_sequence, ColorFn, PixelAnimation,
@@ -136,6 +144,7 @@ pub use crate::video::{
 /// Everything needed to configure and drive `eger` in one `use`.
 pub mod prelude {
     pub use crate::banner::{banner_frames, banner_lines};
+    pub use crate::color::ColorTransform;
     pub use crate::colorize::{
         colorize_frames, colorize_grid, colorize_grid_frames, colorize_joined_sequence,
         colorize_lines, colorize_sequence, ColorFn, PixelAnimation,

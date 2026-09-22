@@ -46,17 +46,25 @@ fn noisy_grid(w: u32, h: u32) -> Grid {
 fn bench_quantization_by_depth(c: &mut Criterion) {
     let grid = noisy_grid(160, 60);
     let mut group = c.benchmark_group("palette_quantize_none_dither");
-    for depth in [ColorDepth::Ansi16, ColorDepth::Ansi256, ColorDepth::TrueColor] {
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{depth:?}")), &depth, |b, &depth| {
-            let options = DitherOptions::new(DitherMethod::None);
-            b.iter(|| {
-                black_box(eger::dither::render_ansi_dithered(
-                    black_box(&grid),
-                    black_box(depth),
-                    black_box(options),
-                ))
-            });
-        });
+    for depth in [
+        ColorDepth::Ansi16,
+        ColorDepth::Ansi256,
+        ColorDepth::TrueColor,
+    ] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{depth:?}")),
+            &depth,
+            |b, &depth| {
+                let options = DitherOptions::new(DitherMethod::None);
+                b.iter(|| {
+                    black_box(eger::dither::render_ansi_dithered(
+                        black_box(&grid),
+                        black_box(depth),
+                        black_box(options),
+                    ))
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -64,10 +72,18 @@ fn bench_quantization_by_depth(c: &mut Criterion) {
 fn bench_iascii_render_ansi_by_depth(c: &mut Criterion) {
     let grid = noisy_grid(160, 60);
     let mut group = c.benchmark_group("palette_iascii_render_ansi");
-    for depth in [ColorDepth::Ansi16, ColorDepth::Ansi256, ColorDepth::TrueColor] {
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{depth:?}")), &depth, |b, &depth| {
-            b.iter(|| black_box(render_ansi(black_box(&grid), black_box(depth))));
-        });
+    for depth in [
+        ColorDepth::Ansi16,
+        ColorDepth::Ansi256,
+        ColorDepth::TrueColor,
+    ] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{depth:?}")),
+            &depth,
+            |b, &depth| {
+                b.iter(|| black_box(render_ansi(black_box(&grid), black_box(depth))));
+            },
+        );
     }
     group.finish();
 }

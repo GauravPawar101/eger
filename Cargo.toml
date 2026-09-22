@@ -1,6 +1,6 @@
 [package]
 name = "eger"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "A high-level, parallel ASCII-art media pipeline built on top of iascii: images, video, GIFs, dithering, animated text/banners, and procedural illusions, all rendered to ANSI."
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ repository = "https://github.com/Gauravpawar101/eger"
 homepage = "https://github.com/Gauravpawar101/eger"
 documentation = "https://docs.rs/eger"
 readme = "README.md"
-authors = ["Gaurav Pawar <gauravpawar2522@gmail.com"]
+authors = ["Gaurav Pawar gauravpawar2522@gmail.com"]
 
 [lib]
 name = "eger"
