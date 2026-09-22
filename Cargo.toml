@@ -45,6 +45,7 @@ wasm-bindgen = { version = "0.2", optional = true }
 default = []
 video = ["dep:tokio"]
 wasm = ["dep:wasm-bindgen"]
+full = ["video", "wasm"]
 
 [dev-dependencies]
 # See the NOTE above `image` — these pins are only needed for rustc 1.75.
